@@ -1,0 +1,5 @@
+# gym[mujoco] - didn't work - windows/mac
+# stable-baselines3[extra] - didn't work - windows/mac
+gymnasium[mujoco]
+stable-baselines3
+opencv-python
