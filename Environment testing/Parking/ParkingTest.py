@@ -36,7 +36,7 @@ from rllib.algorithms.ppo import *
 type_proportion = 1.0
 # the render mode, "rgb_array" means render the scene to a numpy array, "human" means render the scene to a window
 render_mode = ["rgb_array", "human"][1]
-render_fps = 50
+render_fps = 10
 # the max step of one episode
 max_step = 1000
 env = ParkingEnv(
@@ -80,7 +80,8 @@ class ParkingWrapper(Wrapper):
         lidar_feature = lidar_info / 20.0  # normalize the lidar data to [0, 1]
         other_feature = np.array(
             [
-                info["diff_position"] / 10.0,  # normalize the distance to target position
+                info["diff_position"]
+                / 10.0,  # normalize the distance to target position
                 np.cos(info["diff_angle"]),
                 np.sin(info["diff_angle"]),
                 np.cos(info["diff_heading"]),
@@ -103,15 +104,19 @@ class ParkingWrapper(Wrapper):
         custom_observation = self._preprocess_observation(info)
 
         return custom_observation, reward, terminated, truncated, info
-    
+
     # In practice we do not let the vehicle turn to the maximum steering angle
+
+
 STEER_RATIO = 0.98
 
 
 class RSPlanner:
     # use Reeds-Shepp curve to plan the collision-free path
     def __init__(self, vehicle, lidar_num, lidar_range=lidar_range) -> None:
-        self.radius = vehicle.wheel_base / np.tan(vehicle.steer_range[1] * STEER_RATIO)  # TODO
+        self.radius = vehicle.wheel_base / np.tan(
+            vehicle.steer_range[1] * STEER_RATIO
+        )  # TODO
         self.vehicle_box = vehicle.geometry
         self.lidar_num = lidar_num
         self.lidar_range = lidar_range
@@ -173,11 +178,15 @@ class RSPlanner:
         dest_pos = (dest_coords[0], dest_coords[1], dest_heading)
         self.dest_pos = dest_pos
         self.ego_pos = ego_pos
-        rel_distance = np.sqrt((dest_pos[0] - ego_pos[0]) ** 2 + (dest_pos[1] - ego_pos[1]) ** 2)
+        rel_distance = np.sqrt(
+            (dest_pos[0] - ego_pos[0]) ** 2 + (dest_pos[1] - ego_pos[1]) ** 2
+        )
         if rel_distance > self.threshold_distance:
             return None
 
-        rel_angle = np.arctan2(dest_pos[1] - ego_pos[1], dest_pos[0] - ego_pos[0]) - ego_pos[2]
+        rel_angle = (
+            np.arctan2(dest_pos[1] - ego_pos[1], dest_pos[0] - ego_pos[0]) - ego_pos[2]
+        )
         rel_dest_heading = dest_pos[2] - ego_pos[2]
         goalX, goalY, goalYaw = (
             rel_distance * np.cos(rel_angle),
@@ -217,9 +226,14 @@ class RSPlanner:
             if path.length > 2 * min_path_len:
                 break
 
-            path.get_curve_line(np.array([start_x, start_y]), start_yaw, self.radius, 0.1)
+            path.get_curve_line(
+                np.array([start_x, start_y]), start_yaw, self.radius, 0.1
+            )
             # print(len(path.curve), path.length, len(path.yaw))
-            traj = [[path.curve[k][0], path.curve[k][1], path.yaw[k]] for k in range(len(path.yaw))]
+            traj = [
+                [path.curve[k][0], path.curve[k][1], path.yaw[k]]
+                for k in range(len(path.yaw))
+            ]
             traj_valid = self.is_traj_valid(traj, obstacles_params)
             if traj_valid:
                 return path
@@ -251,7 +265,14 @@ class RSPlanner:
                 ) + np.array([x, y])
                 plt.plot(vehicle_coords[:, 0], vehicle_coords[:, 1], "b-")
             cnt += 1
-            plt.arrow(x, y, 0.1 * np.cos(yaw), 0.1 * np.sin(yaw), head_width=0.1, head_length=0.1)
+            plt.arrow(
+                x,
+                y,
+                0.1 * np.cos(yaw),
+                0.1 * np.sin(yaw),
+                head_width=0.1,
+                head_length=0.1,
+            )
 
         for x, y in self.lidar_pts:
             x, y, _ = coord_transform(x, y, 0, origin)
@@ -273,7 +294,8 @@ class RSPlanner:
         obstacle_edge_x1 = obstacle_edge_x1 + self.center_shift
         self.lidar_pts = np.array([obstacle_edge_x1, obstacle_edge_y1]).T
         obstacle_edge_coords = np.concatenate(
-            (np.expand_dims(obstacle_edge_x1, 1), np.expand_dims(obstacle_edge_y1, 1)), axis=1
+            (np.expand_dims(obstacle_edge_x1, 1), np.expand_dims(obstacle_edge_y1, 1)),
+            axis=1,
         )  # (N, 2)
         shifted_obstacle_coords = obstacle_edge_coords.copy()
         shifted_obstacle_coords[:-1] = obstacle_edge_coords[1:]
@@ -371,30 +393,30 @@ class RSPlanner:
         if collide:
             return False
         return True
-    
+
 
 vehicle = env.scenario_manager.agent
 
 env = ParkingWrapper(env)
 path_planner = RSPlanner(vehicle, num_lidar_rays, lidar_range)
 
-num_trails = 10
-num_success = 0
-for n in range(num_trails):
-    obs, info = env.reset()
-    path = path_planner.get_rs_path(info)
-    if path is None:
-        print("Trail %s: No valid path" % n)
-    else:
-        num_success += 1
-        print("Trail %s: Find valid path" % n)
-        start_x, start_y, start_yaw = path_planner.start_pos
-        path.get_curve_line(np.array([start_x, start_y]), start_yaw, path_planner.radius, 0.1)
-        traj = [[path.curve[k][0], path.curve[k][1], path.yaw[k]] for k in range(len(path.yaw))]
-        print("Path length: ", path.length)
-        path_planner.plot_rs_path(traj)
+# num_trails = 10
+# num_success = 0
+# for n in range(num_trails):
+#     obs, info = env.reset()
+#     path = path_planner.get_rs_path(info)
+#     if path is None:
+#         print("Trail %s: No valid path" % n)
+#     else:
+#         num_success += 1
+#         print("Trail %s: Find valid path" % n)
+#         start_x, start_y, start_yaw = path_planner.start_pos
+#         path.get_curve_line(np.array([start_x, start_y]), start_yaw, path_planner.radius, 0.1)
+#         traj = [[path.curve[k][0], path.curve[k][1], path.yaw[k]] for k in range(len(path.yaw))]
+#         print("Path length: ", path.length)
+#         path_planner.plot_rs_path(traj)
 
-print("Panning success rate: ", num_success / num_trails)
+# print("Panning success rate: ", num_success / num_trails)
 
 
 max_speed = 0.5  # we manually set the max speed in the parking task
@@ -435,9 +457,7 @@ def rear_center_coord(center_x, center_y, heading, lr):
 
 def execute_path_pid(path, env):
     action_type = {"L": 1, "S": 0, "R": -1}
-    radius = vehicle.wheel_base / np.tan(
-        vehicle.steer_range[1] * STEER_RATIO
-    )
+    radius = vehicle.wheel_base / np.tan(vehicle.steer_range[1] * STEER_RATIO)
     env_agent = vehicle
     physics_model = vehicle.physics_model
     # max_speed = max_speed
@@ -499,8 +519,8 @@ def execute_path_pid(path, env):
     arc_centers = []
     for i in range(len(actions)):
         steer, distance = actions[i]
-        target_x_, target_y_, target_yaw_, arc_center_x_, arc_center_y_ = _calculate_target_point(
-            start_x_, start_y_, start_yaw_, steer, distance
+        target_x_, target_y_, target_yaw_, arc_center_x_, arc_center_y_ = (
+            _calculate_target_point(start_x_, start_y_, start_yaw_, steer, distance)
         )
         target_points.append([target_x_, target_y_, target_yaw_])
         arc_centers.append([arc_center_x_, arc_center_y_])
@@ -520,19 +540,29 @@ def execute_path_pid(path, env):
         start_x_, start_y_, start_yaw_ = rear_center_coord(
             start_x, start_y, start_yaw, physics_model.lr
         )
-        distance_to_go = np.sqrt((start_x_ - target_x_) ** 2 + (start_y_ - target_y_) ** 2)
+        distance_to_go = np.sqrt(
+            (start_x_ - target_x_) ** 2 + (start_y_ - target_y_) ** 2
+        )
         while distance_to_go > 0.02:
             curr_state = env_agent.get_state()
-            x, y, yaw, v = curr_state.x, curr_state.y, curr_state.heading, curr_state.speed
+            x, y, yaw, v = (
+                curr_state.x,
+                curr_state.y,
+                curr_state.heading,
+                curr_state.speed,
+            )
             x_, y_, yaw_ = rear_center_coord(x, y, yaw, physics_model.lr)
             distance_to_go = np.sqrt((x_ - target_x_) ** 2 + (y_ - target_y_) ** 2)
-            target_v = velocity_controller.update(-distance_to_go * vehicle_orientation, 0)
+            target_v = velocity_controller.update(
+                -distance_to_go * vehicle_orientation, 0
+            )
             target_v = np.clip(target_v, -max_speed, max_speed)
             target_a = accelerate_controller.update(v, target_v)
             target_a = np.clip(target_a, -max_acceleration, max_acceleration)
             if arc_center_x_ is not None:
                 error_distance_to_center = (
-                    np.sqrt((x_ - arc_center_x_) ** 2 + (y_ - arc_center_y_) ** 2) - radius
+                    np.sqrt((x_ - arc_center_x_) ** 2 + (y_ - arc_center_y_) ** 2)
+                    - radius
                 )
                 error_distance_to_center *= np.sign(
                     steer
@@ -568,23 +598,25 @@ def execute_path_pid(path, env):
 
     return total_reward, done, info
 
-num_trails = 10
-num_success = 0
-for n in range(num_trails):
-    obs, info = env.reset()
-    path = path_planner.get_rs_path(info)
-    if path is None:
-        print("Trail %s: No valid path" % n)
-        pass
-    else:
-        print("Trail %s: Find valid path" % n)
-        total_reward, done, info = execute_path_pid(path, env)
-        print("status: ", info["scenario_status"])
-        if info["scenario_status"] == ScenarioStatus.COMPLETED:
-            num_success += 1
-        # break
 
-print("Parking success rate: ", num_success / num_trails)
+# num_trails = 10
+# num_success = 0
+# for n in range(num_trails):
+#     obs, info = env.reset()
+#     path = path_planner.get_rs_path(info)
+#     if path is None:
+#         print("Trail %s: No valid path" % n)
+#         pass
+#     else:
+#         print("Trail %s: Find valid path" % n)
+#         total_reward, done, info = execute_path_pid(path, env)
+#         print("status: ", info["scenario_status"])
+#         if info["scenario_status"] == ScenarioStatus.COMPLETED:
+#             num_success += 1
+#         # break
+
+# print("Parking success rate: ", num_success / num_trails)
+
 
 class RSAgent:
     def __init__(
@@ -601,7 +633,9 @@ class RSAgent:
         self.max_acceleration = max_acceleration
         self.steer_ratio = steer_ratio
         self.execute_radius = execute_radius
-        self.dr = dr  # the distance between the rear wheel center and the vehicle center
+        self.dr = (
+            dr  # the distance between the rear wheel center and the vehicle center
+        )
         self.distance_record = []
 
         self.accelerate_controller = PIDController(0, 2.0, 0.0, 0.0)
@@ -667,19 +701,30 @@ class RSAgent:
         for i in range(len(path.actions)):
             # print(path.actions[i], path.signs[i], path.segments[i], path.segments[i]* radius)
             steer_normalized = action_type[path.actions[i]]  # [-1,1]
-            correction_speed_ratio_on_curve = 1 if steer_normalized == 0 else 1.0  # / np.cos(beta)
-            distance = path.signs[i] * path.segments[i] * radius * correction_speed_ratio_on_curve
+            correction_speed_ratio_on_curve = (
+                1 if steer_normalized == 0 else 1.0
+            )  # / np.cos(beta)
+            distance = (
+                path.signs[i]
+                * path.segments[i]
+                * radius
+                * correction_speed_ratio_on_curve
+            )
             segments.append([steer_normalized, distance])
 
         start_x, start_y, start_yaw = start_pos
-        start_x_, start_y_, start_yaw_ = rear_center_coord(start_x, start_y, start_yaw, self.dr)
+        start_x_, start_y_, start_yaw_ = rear_center_coord(
+            start_x, start_y, start_yaw, self.dr
+        )
         target_points = []
         arc_centers = []
         start_points = []
         for i in range(len(segments)):
             steer, distance = segments[i]
             target_x_, target_y_, target_yaw_, arc_center_x_, arc_center_y_ = (
-                self._calculate_target_point(start_x_, start_y_, start_yaw_, steer, distance)
+                self._calculate_target_point(
+                    start_x_, start_y_, start_yaw_, steer, distance
+                )
             )
             target_points.append([target_x_, target_y_, target_yaw_])
             arc_centers.append([arc_center_x_, arc_center_y_])
@@ -706,14 +751,20 @@ class RSAgent:
             curr_state.heading,
             curr_state.speed,
         )
-        curr_x_, curr_y_, curr_yaw_ = rear_center_coord(curr_x, curr_y, curr_yaw, self.dr)
+        curr_x_, curr_y_, curr_yaw_ = rear_center_coord(
+            curr_x, curr_y, curr_yaw, self.dr
+        )
         distance_to_go = np.sqrt(
             (curr_x_ - self.path_info["target_points"][0][0]) ** 2
             + (curr_y_ - self.path_info["target_points"][0][1]) ** 2
         )
-        last_distance = self.distance_record[-1] if len(self.distance_record) > 0 else np.inf
+        last_distance = (
+            self.distance_record[-1] if len(self.distance_record) > 0 else np.inf
+        )
         self.distance_record.append(distance_to_go)
-        if distance_to_go < 0.02 or (last_distance < distance_to_go and distance_to_go < 0.1):
+        if distance_to_go < 0.02 or (
+            last_distance < distance_to_go and distance_to_go < 0.1
+        ):
             self.distance_record = []
             self.path_info["segments"].pop(0)
             self.path_info["target_points"].pop(0)
@@ -730,15 +781,20 @@ class RSAgent:
         target_x_, target_y_, target_yaw_ = self.path_info["target_points"][0]
         arc_center_x_, arc_center_y_ = self.path_info["arc_centers"][0]
 
-        distance_to_go = np.sqrt((curr_x_ - target_x_) ** 2 + (curr_y_ - target_y_) ** 2)
-        target_v = self.velocity_controller.update(-distance_to_go * vehicle_orientation, 0)
+        distance_to_go = np.sqrt(
+            (curr_x_ - target_x_) ** 2 + (curr_y_ - target_y_) ** 2
+        )
+        target_v = self.velocity_controller.update(
+            -distance_to_go * vehicle_orientation, 0
+        )
         target_v = np.clip(target_v, -self.max_speed, self.max_speed)
         target_a = self.accelerate_controller.update(curr_v, target_v)
         target_a = np.clip(target_a, -self.max_acceleration, self.max_acceleration)
 
         if arc_center_x_ is not None:
             error_distance_to_center = (
-                np.sqrt((curr_x_ - arc_center_x_) ** 2 + (curr_y_ - arc_center_y_) ** 2) - radius
+                np.sqrt((curr_x_ - arc_center_x_) ** 2 + (curr_y_ - arc_center_y_) ** 2)
+                - radius
             )
             error_distance_to_center *= np.sign(
                 steer
@@ -750,7 +806,10 @@ class RSAgent:
             target_current_yaw = target_yaw_
             start_x_, start_y_, _ = self.path_info["start_points"][0]
             error_distance_to_center = self._calc_pt_error(
-                [start_x_, start_y_], [target_x_, target_y_], [curr_x_, curr_y_], curr_yaw_
+                [start_x_, start_y_],
+                [target_x_, target_y_],
+                [curr_x_, curr_y_],
+                curr_yaw_,
             )
 
         error_yaw = -(target_current_yaw - curr_yaw_)
@@ -805,7 +864,7 @@ class ParkingActor(PPOActor):
 
 
 class ParkingAgent(PPO):
-    def __init__(self, config, rs_agent: RSAgent, device, max_speed=0.5, max_acceleration=2.0):
+    def __init__(self, config, device, max_speed=0.5, max_acceleration=2.0):
         super(ParkingAgent, self).__init__(config, device)
         self.rs_agent = rs_agent
         self.accel_controller = PIDController(0, 2.0, 0.0, 0.0)
@@ -880,6 +939,7 @@ class ParkingAgent(PPO):
         self.accel_controller.reset()
         self.rs_agent.reset()
 
+
 def train_rl_agent(env, agent, episode_num=int(1e5), log_path=None, verbose=True):
     if log_path is None:
         log_dir = "./logs"
@@ -900,11 +960,14 @@ def train_rl_agent(env, agent, episode_num=int(1e5), log_path=None, verbose=True
 
     print("start train!")
     while episode_cnt < episode_num:
+
+
         state, info = env.reset()
         agent.reset()
         done = False
         total_reward = 0
         episode_step_cnt = 0
+        print(episode_cnt)
 
         while not done:
             step_cnt += 1
@@ -915,7 +978,8 @@ def train_rl_agent(env, agent, episode_num=int(1e5), log_path=None, verbose=True
             if len(log_prob.shape) == 2:
                 log_prob = log_prob.squeeze(0)
             next_state, reward, terminate, truncated, info = env.step(action)
-            env.render()
+            if episode_cnt % 10 == 0:
+                env.render()           
             done = terminate or truncated
             total_reward += reward
             observations = [[next_state], [reward], [terminate], [truncated], [info]]
@@ -939,7 +1003,12 @@ def train_rl_agent(env, agent, episode_num=int(1e5), log_path=None, verbose=True
             if verbose:
                 print(
                     "episode: %d, total step: %d, average reward: %s, success rate: %s"
-                    % (episode_cnt, step_cnt, np.mean(reward_list), np.mean(success_list))
+                    % (
+                        episode_cnt,
+                        step_cnt,
+                        np.mean(reward_list),
+                        np.mean(success_list),
+                    )
                 )
                 print("last 10 episode:")
                 for i in range(10):
@@ -952,6 +1021,7 @@ def train_rl_agent(env, agent, episode_num=int(1e5), log_path=None, verbose=True
 
         if episode_cnt % 1000 == 0:
             agent.save(os.path.join(log_path, "model_%d.pth" % episode_cnt))
+
 
 agent_config = PPOConfig(
     {
@@ -967,7 +1037,10 @@ agent_config = PPOConfig(
             "hidden_size": 256,
             "continuous": True,
         },
-        "critic_kwargs": {"state_dim": env.observation_space.shape[0], "hidden_size": 256},
+        "critic_kwargs": {
+            "state_dim": env.observation_space.shape[0],
+            "hidden_size": 256,
+        },
         "horizon": 20000,
         "batch_size": 32,
         "adam_epsilon": 1e-8,
@@ -975,13 +1048,15 @@ agent_config = PPOConfig(
 )
 min_radius = vehicle.wheel_base / np.tan(vehicle.steer_range[1] * STEER_RATIO)
 vehicle_rear_to_center = 0.5 * vehicle.length - vehicle.rear_overhang
+print(torch.cuda.is_available())
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 rs_agent = RSAgent(path_planner, min_radius, vehicle_rear_to_center)
-agent = ParkingAgent(agent_config, rs_agent, device)
+agent = ParkingAgent(agent_config, device)
 log_path = "./logs"
-num_episode = 20  # 1e5
+num_episode = 1e5
 
 train_rl_agent(env, agent, episode_num=num_episode, log_path=log_path, verbose=True)
+
 
 def eval_rl_agent(env, agent, episode_num=int(1e2), verbose=True):
 
@@ -1020,7 +1095,9 @@ def eval_rl_agent(env, agent, episode_num=int(1e2), verbose=True):
                     loss_list.append(loss)
 
             status_info.append([info["scenario_status"], info["traffic_status"]])
-            success_list.append(int(info["scenario_status"] == ScenarioStatus.COMPLETED))
+            success_list.append(
+                int(info["scenario_status"] == ScenarioStatus.COMPLETED)
+            )
             reward_list.append(total_reward)
             episode_cnt += 1
 
@@ -1028,7 +1105,12 @@ def eval_rl_agent(env, agent, episode_num=int(1e2), verbose=True):
                 if verbose:
                     print(
                         "episode: %d, total step: %d, average reward: %s, success rate: %s"
-                        % (episode_cnt, step_cnt, np.mean(reward_list), np.mean(success_list))
+                        % (
+                            episode_cnt,
+                            step_cnt,
+                            np.mean(reward_list),
+                            np.mean(success_list),
+                        )
                     )
                     print("last 10 episode:")
                     for i in range(10):
@@ -1037,9 +1119,10 @@ def eval_rl_agent(env, agent, episode_num=int(1e2), verbose=True):
 
     return np.mean(success_list), np.mean(reward_list)
 
+
 start_t = time.time()
-agent.load("./data/parking_agent.pth")
-succ_rate, avg_reard = eval_rl_agent(env, agent, episode_num=100, verbose=False)
+# agent.load("./data/parking_agent.pth")
+# succ_rate, avg_reard = eval_rl_agent(env, agent, episode_num=100, verbose=False)
 print("Success rate: ", succ_rate)
 print("Average reward: ", avg_reard)
 print("eval time: ", time.time() - start_t)
