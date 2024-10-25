@@ -28,6 +28,7 @@ from tactics2d.envs import ParkingEnv
 from tactics2d.math.interpolate import ReedsShepp
 from tactics2d.traffic.status import ScenarioStatus
 
+
 from rllib.algorithms.ppo import *
 
 ## Environment
@@ -35,8 +36,8 @@ from rllib.algorithms.ppo import *
 # 0 means all scenarios are parallel parking, 1 means all scenarios are vertical parking
 type_proportion = 1.0
 # the render mode, "rgb_array" means render the scene to a numpy array, "human" means render the scene to a window
-render_mode = ["rgb_array", "human"][1]
-render_fps = 10
+render_mode = ["rgb_array", "human"][0]
+render_fps = 1000
 # the max step of one episode
 max_step = 1000
 env = ParkingEnv(
@@ -961,7 +962,6 @@ def train_rl_agent(env, agent, episode_num=int(1e5), log_path=None, verbose=True
     print("start train!")
     while episode_cnt < episode_num:
 
-
         state, info = env.reset()
         agent.reset()
         done = False
@@ -978,8 +978,8 @@ def train_rl_agent(env, agent, episode_num=int(1e5), log_path=None, verbose=True
             if len(log_prob.shape) == 2:
                 log_prob = log_prob.squeeze(0)
             next_state, reward, terminate, truncated, info = env.step(action)
-            if episode_cnt % 10 == 0:
-                env.render()           
+            # if episode_cnt % 10 == 0:
+            env.render()
             done = terminate or truncated
             total_reward += reward
             observations = [[next_state], [reward], [terminate], [truncated], [info]]
@@ -1053,7 +1053,7 @@ device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cp
 rs_agent = RSAgent(path_planner, min_radius, vehicle_rear_to_center)
 agent = ParkingAgent(agent_config, device)
 log_path = "./logs"
-num_episode = 1e5
+num_episode = 100
 
 train_rl_agent(env, agent, episode_num=num_episode, log_path=log_path, verbose=True)
 
@@ -1122,7 +1122,7 @@ def eval_rl_agent(env, agent, episode_num=int(1e2), verbose=True):
 
 start_t = time.time()
 # agent.load("./data/parking_agent.pth")
-# succ_rate, avg_reard = eval_rl_agent(env, agent, episode_num=100, verbose=False)
+succ_rate, avg_reard = eval_rl_agent(env, agent, episode_num=100, verbose=True)
 print("Success rate: ", succ_rate)
 print("Average reward: ", avg_reard)
 print("eval time: ", time.time() - start_t)
