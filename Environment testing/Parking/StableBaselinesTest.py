@@ -13,10 +13,6 @@ import torch
 from torch.distributions import Normal
 from torch.utils.tensorboard import SummaryWriter
 
-# Add the local tactics2d directory to the Python path
-sys.path.insert(
-    0, os.path.abspath(os.path.join(os.path.dirname(__file__), "./tactics2d/tactics2d"))
-)
 
 from tactics2d.envs import ParkingEnv
 from tactics2d.math.interpolate import ReedsShepp
@@ -25,14 +21,9 @@ from tactics2d.traffic.status import ScenarioStatus
 from stable_baselines3 import PPO
 from stable_baselines3.common.evaluation import evaluate_policy
 
-## Environment
-# the proportion of the type of parking lot,
-# 0 means all scenarios are parallel parking, 1 means all scenarios are vertical parking
 type_proportion = 1.0
-# the render mode, "rgb_array" means render the scene to a numpy array, "human" means render the scene to a window
-render_mode = ["rgb_array", "human"][1]
+render_mode = ["rgb_array", "human"][0]
 render_fps = 10
-# the max step of one episode
 max_step = 1000
 env = ParkingEnv(
     type_proportion=type_proportion,
@@ -41,11 +32,9 @@ env = ParkingEnv(
     max_step=max_step,
 )
 
-# Check if CUDA is available and set the device
 print(torch.cuda.is_available())
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-# Initialize the PPO agent
 model = PPO(
     "MlpPolicy",
     env,
@@ -57,24 +46,18 @@ model = PPO(
     device=device,
 )
 
-# Train the PPO agent
-num_timesteps = 100  # Adjust the number of timesteps as needed
+num_timesteps = 100
 model.learn(total_timesteps=num_timesteps)
 
-# Save the trained model
 model.save("ppo_parking")
 
-# Evaluate the PPO agent
 mean_reward, std_reward = evaluate_policy(model, env, n_eval_episodes=100)
 print(f"Mean reward: {mean_reward} +/- {std_reward}")
 
 
-# Define the evaluation function
 def eval_rl_agent(env, model, episode_num=100, verbose=True):
     reward_list = deque(maxlen=episode_num)
     success_list = deque(maxlen=episode_num)
-    loss_list = deque(maxlen=episode_num)
-    status_info = deque(maxlen=episode_num)
 
     for _ in range(episode_num):
         obs = env.reset()
@@ -94,5 +77,4 @@ def eval_rl_agent(env, model, episode_num=100, verbose=True):
     return reward_list, success_list
 
 
-# Evaluate the trained agent
 eval_rl_agent(env, model, episode_num=100)
