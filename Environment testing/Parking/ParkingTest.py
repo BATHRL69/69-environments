@@ -121,7 +121,6 @@ vehicle = env.scenario_manager.agent
 env = ParkingWrapper(env)
 
 
-
 max_speed = 0.5  # we manually set the max speed in the parking task
 
 
@@ -251,9 +250,7 @@ class ParkingAgent(PPO):
         self.accel_controller.reset()
 
 
-
-
-def train_rl_agent(env,agent, episode_num=int(1e5), log_path=None, verbose=True):
+def train_rl_agent(env, agent, episode_num=int(1e5), log_path=None, verbose=True):
     if log_path is None:
         log_dir = "./logs"
         current_time = time.localtime()
@@ -297,7 +294,7 @@ def train_rl_agent(env,agent, episode_num=int(1e5), log_path=None, verbose=True)
             observations = [[next_state], [reward], [terminate], [truncated], [info]]
             agent.push([observations, [state], [action], [log_prob], [value]])
             # early stop the episode if the vehicle could not find an available RS path
-            if  episode_step_cnt >= 200:
+            if episode_step_cnt >= 400:
                 done = True
                 break
 
@@ -364,7 +361,7 @@ print(torch.cuda.is_available())
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 agent = ParkingAgent(agent_config, device)
 log_path = "./logs"
-num_episode = 10000
+num_episode = 100000
 
 train_rl_agent(env, agent, episode_num=num_episode, log_path=log_path, verbose=True)
 
