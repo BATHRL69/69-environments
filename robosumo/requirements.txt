@@ -1,0 +1,7 @@
+mujoco-py<2.2,>=2.1
+gym
+stable-baselines[mpi]
+numpy
+click
+# for using pre-trained policies:
+tensorflow>=1.1.0
