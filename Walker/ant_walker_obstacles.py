@@ -21,6 +21,24 @@ obstacle_xml = """
     <body name="obstacle_3" pos="6 6 0.5">
         <geom name="obs3" type="cylinder" size="0.2 0.5" rgba="1 0 0 1"/>
     </body>
+    <body name="obstacle_4" pos="3 -2 0.5">
+        <geom name="obs4" type="cylinder" size="0.3 0.7" rgba="0 1 0 1"/>
+    </body>
+    <body name="obstacle_5" pos="-2 3 0.5">
+        <geom name="obs5" type="cylinder" size="0.15 0.4" rgba="0 0 1 1"/>
+    </body>
+    <body name="obstacle_6" pos="5 0 0.5">
+        <geom name="obs6" type="cylinder" size="0.25 0.6" rgba="1 1 0 1"/>
+    </body>
+    <body name="obstacle_7" pos="-3 -3 0.5">
+        <geom name="obs7" type="cylinder" size="0.2 0.8" rgba="1 0 1 1"/>
+    </body>
+    <body name="obstacle_8" pos="0 5 0.5">
+        <geom name="obs8" type="cylinder" size="0.4 0.3" rgba="0 1 1 1"/>
+    </body>
+    <body name="obstacle_9" pos="8 -1 0.5">
+        <geom name="obs9" type="cylinder" size="0.3 0.5" rgba="0.5 0.5 0 1"/>
+    </body>
 """
 
 modified_xml = xml_string.replace("</worldbody>", f"{obstacle_xml}\n</worldbody>")
@@ -38,13 +56,13 @@ env = gym.make(
 )
 
 model = PPO("MlpPolicy", env, verbose=1, device="cuda")
-model.learn(total_timesteps=100_000)
+model.learn(total_timesteps=600_000)
 model.save("ppo_inverted_double_pendulum")
 
 
 obs, info = env.reset()
 
-for i in range(100_000):
+for i in range(600_000):
     action, _ = model.predict(obs, deterministic=True)
     obs, reward, done, trunacted, info = env.step(action)
     img = env.render()
