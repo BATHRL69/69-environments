@@ -10,6 +10,74 @@ default_path = os.path.join(
 with open(default_path, "r") as f:
     xml_string = f.read()
 
+
+block_obstacle_xml = """
+    <!-- Front wall -->
+    <body name="wall_front" pos="0 2 0.5">
+        <geom name="wf" type="box" size="2.5 0.1 0.8" rgba="0.8 0.8 0.8 0.8"/>
+    </body>
+    
+    <!-- Back wall -->
+    <body name="wall_back" pos="0 -2 0.5">
+        <geom name="wb" type="box" size="2.5 0.1 0.8" rgba="0.8 0.8 0.8 0.8"/>
+    </body>
+    
+    <!-- Left wall -->
+    <body name="wall_left" pos="-2 0 0.5">
+        <geom name="wl" type="box" size="0.1 2.5 0.8" rgba="0.8 0.8 0.8 0.8"/>
+    </body>
+    
+    <!-- Right wall -->
+    <body name="wall_right" pos="2 0 0.5">
+        <geom name="wr" type="box" size="0.1 2.5 0.8" rgba="0.8 0.8 0.8 0.8"/>
+    </body>
+"""
+
+wall_obstacle_xml = """
+    <!-- Front wall -->
+    <body name="wall_front_1" pos="-2 2 0.5">
+        <geom name="wf1" type="cylinder" size="0.2 0.8" rgba="0.8 0.8 0.8 1"/>
+    </body>
+    <body name="wall_front_2" pos="0 2 0.5">
+        <geom name="wf2" type="cylinder" size="0.2 0.8" rgba="0.8 0.8 0.8 1"/>
+    </body>
+    <body name="wall_front_3" pos="2 2 0.5">
+        <geom name="wf3" type="cylinder" size="0.2 0.8" rgba="0.8 0.8 0.8 1"/>
+    </body>
+    
+    <!-- Back wall -->
+    <body name="wall_back_1" pos="-2 -2 0.5">
+        <geom name="wb1" type="cylinder" size="0.2 0.8" rgba="0.8 0.8 0.8 1"/>
+    </body>
+    <body name="wall_back_2" pos="0 -2 0.5">
+        <geom name="wb2" type="cylinder" size="0.2 0.8" rgba="0.8 0.8 0.8 1"/>
+    </body>
+    <body name="wall_back_3" pos="2 -2 0.5">
+        <geom name="wb3" type="cylinder" size="0.2 0.8" rgba="0.8 0.8 0.8 1"/>
+    </body>
+    
+    <!-- Left wall -->
+    <body name="wall_left_1" pos="-2 -2 0.5">
+        <geom name="wl1" type="cylinder" size="0.2 0.8" rgba="0.8 0.8 0.8 1"/>
+    </body>
+    <body name="wall_left_2" pos="-2 0 0.5">
+        <geom name="wl2" type="cylinder" size="0.2 0.8" rgba="0.8 0.8 0.8 1"/>
+    </body>
+    <body name="wall_left_3" pos="-2 2 0.5">
+        <geom name="wl3" type="cylinder" size="0.2 0.8" rgba="0.8 0.8 0.8 1"/>
+    </body>
+    
+    <!-- Right wall -->
+    <body name="wall_right_1" pos="2 -2 0.5">
+        <geom name="wr1" type="cylinder" size="0.2 0.8" rgba="0.8 0.8 0.8 1"/>
+    </body>
+    <body name="wall_right_2" pos="2 0 0.5">
+        <geom name="wr2" type="cylinder" size="0.2 0.8" rgba="0.8 0.8 0.8 1"/>
+    </body>
+    <body name="wall_right_3" pos="2 2 0.5">
+        <geom name="wr3" type="cylinder" size="0.2 0.8" rgba="0.8 0.8 0.8 1"/>
+    </body>
+"""
 # Add my obstacles
 obstacle_xml = """
     <body name="obstacle_1" pos="2 2 0.5">
@@ -41,7 +109,10 @@ obstacle_xml = """
     </body>
 """
 
-modified_xml = xml_string.replace("</worldbody>", f"{obstacle_xml}\n</worldbody>")
+
+modified_xml = xml_string.replace(
+    "</worldbody>", f"{block_obstacle_xml}\n</worldbody>"
+)  # Update the chosen xml here
 
 custom_xml_path = (
     "C:/Users/Solly/_/python/69/Walker/temp_ant.xml"  # UPDATE ME TO YOUR path
@@ -55,14 +126,16 @@ env = gym.make(
     xml_file=custom_xml_path,
 )
 
+num_timesteps = 600_000
+
 model = PPO("MlpPolicy", env, verbose=1, device="cuda")
-model.learn(total_timesteps=600_000)
+model.learn(total_timesteps=num_timesteps)
 model.save("ppo_inverted_double_pendulum")
 
 
 obs, info = env.reset()
 
-for i in range(600_000):
+for i in range(num_timesteps):
     action, _ = model.predict(obs, deterministic=True)
     obs, reward, done, trunacted, info = env.step(action)
     img = env.render()
