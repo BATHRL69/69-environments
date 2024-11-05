@@ -54,7 +54,7 @@ def main():
     parser.add_argument("-e", "--env_name", type=str,default="Humanoid-v4", required=False, help="Gymnasium environment name")
     parser.add_argument("-t", "--timesteps", type=int,default=30000, required=False, help="Number of training timesteps")
     parser.add_argument("-v", "--verbosity", type=int,default=0, required=False, help="Verbosity level")
-    parser.add_argument("-sf", "--save_path", type=str,default="", required=False, help="Directory to save models and logs")
+    parser.add_argument("-sp", "--save_path", type=str,default="", required=False, help="Directory to save models and logs")
 
     args = parser.parse_args()
     train(args.env_name, args.model_type, args.timesteps, args.verbosity, args.save_path)
