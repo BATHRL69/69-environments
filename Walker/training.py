@@ -2,9 +2,9 @@
 # One should simply run in the terminal a command as follows:
 # ~python -m MODEL_TYPE -e ENV_TYPE -t TIMESTEPS -v VERBOSITY -sf SAVE_FILEPATH
 # e.g. python -m SAC -e Humanoid-v4 -t 250000 -v 1 -sf 69-environments/Walker/
-### This is designed to be adjusted later for our own algorithms
+## This is designed to be adjusted later for our own algorithms
 
-### Need to add logging still
+## Need to add logging still
 
 import os
 import argparse
