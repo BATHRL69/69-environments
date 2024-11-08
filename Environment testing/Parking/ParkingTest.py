@@ -37,7 +37,7 @@ from rllib.algorithms.ppo import *  ## Environment
 # 0 means all scenarios are parallel parking, 1 means all scenarios are vertical parking
 type_proportion = 1.0
 # the render mode, "rgb_array" means render the scene to a numpy array, "human" means render the scene to a window
-render_mode = ["rgb_array", "human"][0]
+render_mode = ["rgb_array", "human"][1]
 render_fps = 1000
 # the max step of one episode
 max_step = 1000
@@ -288,13 +288,13 @@ def train_rl_agent(env, agent, episode_num=int(1e5), log_path=None, verbose=True
                 log_prob = log_prob.squeeze(0)
             next_state, reward, terminate, truncated, info = env.step(action)
             # if episode_cnt % 10 == 0:
-            env.render()
+            # env.render()
             done = terminate or truncated
             total_reward += reward
             observations = [[next_state], [reward], [terminate], [truncated], [info]]
             agent.push([observations, [state], [action], [log_prob], [value]])
             # early stop the episode if the vehicle could not find an available RS path
-            if episode_step_cnt >= 400:
+            if episode_step_cnt >= 200:
                 done = True
                 break
 
