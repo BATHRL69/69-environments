@@ -1,7 +1,8 @@
 import gymnasium as gym
-from stable_baselines3 import PPO
+from stable_baselines3 import SAC, PPO
 import cv2
 import os
+import torch
 
 default_path = os.path.join(
     os.path.dirname(gym.__file__), "envs", "mujoco", "assets", "ant.xml"
@@ -111,7 +112,7 @@ obstacle_xml = """
 
 
 modified_xml = xml_string.replace(
-    "</worldbody>", f"{block_obstacle_xml}\n</worldbody>"
+    "</worldbody>", f"{obstacle_xml}\n</worldbody>"
 )  # Update the chosen xml here
 
 custom_xml_path = (
@@ -126,9 +127,10 @@ env = gym.make(
     xml_file=custom_xml_path,
 )
 
-num_timesteps = 600_000
 
-model = PPO("MlpPolicy", env, verbose=1, device="cuda")
+num_timesteps = 500_000
+
+model = SAC("MlpPolicy", env, verbose=1, device="cuda")
 model.learn(total_timesteps=num_timesteps)
 model.save("ppo_inverted_double_pendulum")
 
