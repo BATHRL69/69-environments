@@ -2,6 +2,8 @@ import cv2
 
 
 def render_learning(num_timesteps, env, model):
+    obs, _info = env.reset()
+
     for _ in range(num_timesteps):
         action, _ = model.predict(obs, deterministic=True)
         obs, _reward, done, _trunacted, _info = env.step(action)
