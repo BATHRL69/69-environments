@@ -1,7 +1,8 @@
 import os
+import gymnasium as gym
 
 
-def update_env_xml():
+def update_env_xml(add_obstacles, add_slippy_surface, reduce_motor_strength):
     default_path = os.path.join(
         os.path.dirname(gym.__file__), "envs", "mujoco", "assets", "ant.xml"
     )
@@ -78,36 +79,43 @@ def update_env_xml():
     """
     # Add my obstacles
     obstacle_xml = """
-        <body name="obstacle_1" pos="2 2 0.5">
-            <geom name="obs1" type="cylinder" size="0.2 0.5" rgba="1 0 0 1"/>
+       <body name="obstacle_1" pos="2 2 0.5">
+            <geom name="obs1" type="cylinder" size="0.2 0.5" rgba="1 0 0 1" contype="1" conaffinity="1"/>
         </body>
         <body name="obstacle_2" pos="4 4 0.5">
-            <geom name="obs2" type="cylinder" size="0.2 0.5" rgba="1 0 0 1"/>
+            <geom name="obs2" type="cylinder" size="0.2 0.5" rgba="1 0 0 1" contype="1" conaffinity="1"/>
         </body>
         <body name="obstacle_3" pos="6 6 0.5">
-            <geom name="obs3" type="cylinder" size="0.2 0.5" rgba="1 0 0 1"/>
+            <geom name="obs3" type="cylinder" size="0.2 0.5" rgba="1 0 0 1" contype="1" conaffinity="1"/>
         </body>
         <body name="obstacle_4" pos="3 -2 0.5">
-            <geom name="obs4" type="cylinder" size="0.3 0.7" rgba="0 1 0 1"/>
+            <geom name="obs4" type="cylinder" size="0.3 0.7" rgba="0 1 0 1" contype="1" conaffinity="1"/>
         </body>
         <body name="obstacle_5" pos="-2 3 0.5">
-            <geom name="obs5" type="cylinder" size="0.15 0.4" rgba="0 0 1 1"/>
+            <geom name="obs5" type="cylinder" size="0.15 0.4" rgba="0 0 1 1" contype="1" conaffinity="1"/>
         </body>
         <body name="obstacle_6" pos="5 0 0.5">
-            <geom name="obs6" type="cylinder" size="0.25 0.6" rgba="1 1 0 1"/>
+            <geom name="obs6" type="cylinder" size="0.25 0.6" rgba="1 1 0 1" contype="1" conaffinity="1"/>
         </body>
         <body name="obstacle_7" pos="-3 -3 0.5">
-            <geom name="obs7" type="cylinder" size="0.2 0.8" rgba="1 0 1 1"/>
+            <geom name="obs7" type="cylinder" size="0.2 0.8" rgba="1 0 1 1" contype="1" conaffinity="1"/>
         </body>
         <body name="obstacle_8" pos="0 5 0.5">
-            <geom name="obs8" type="cylinder" size="0.4 0.3" rgba="0 1 1 1"/>
+            <geom name="obs8" type="cylinder" size="0.4 0.3" rgba="0 1 1 1" contype="1" conaffinity="1"/>
         </body>
         <body name="obstacle_9" pos="8 -1 0.5">
-            <geom name="obs9" type="cylinder" size="0.3 0.5" rgba="0.5 0.5 0 1"/>
+            <geom name="obs9" type="cylinder" size="0.3 0.5" rgba="0.5 0.5 0 1" contype="1" conaffinity="1"/>
         </body>
     """
+    if add_obstacles:
+        modified_xml = xml_string.replace(
+            "</worldbody>", f"{obstacle_xml}\n</worldbody>"
+        )
+    if add_slippy_surface:
+        pass
 
-    modified_xml = xml_string.replace("</worldbody>", f"{obstacle_xml}\n</worldbody>")
+    if reduce_motor_strength:
+        pass
     custom_xml_path = (
         "C:/Users/Solly/_/python/69/Walker/temp_ant.xml"  # UPDATE ME TO YOUR path
     )

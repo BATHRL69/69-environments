@@ -1,7 +1,6 @@
 <mujoco model="ant">
   <compiler angle="degree" coordinate="local" inertiafromgeom="true"/>
   <option integrator="RK4" timestep="0.01"/>
-  <option gravity="0 0 -19.62"/> 
   <custom>
     <numeric data="0.0 0.0 0.55 1.0 0.0 0.0 0.0 0.0 1.0 0.0 -1.0 0.0 -1.0 0.0 1.0" name="init_qpos"/>
   </custom>
@@ -69,34 +68,34 @@
       </body>
     </body>
   
-    <body name="obstacle_1" pos="2 2 0.5">
-        <geom name="obs1" type="cylinder" size="0.2 0.5" rgba="1 0 0 1"/>
-    </body>
-    <body name="obstacle_2" pos="4 4 0.5">
-        <geom name="obs2" type="cylinder" size="0.2 0.5" rgba="1 0 0 1"/>
-    </body>
-    <body name="obstacle_3" pos="6 6 0.5">
-        <geom name="obs3" type="cylinder" size="0.2 0.5" rgba="1 0 0 1"/>
-    </body>
-    <body name="obstacle_4" pos="3 -2 0.5">
-        <geom name="obs4" type="cylinder" size="0.3 0.7" rgba="0 1 0 1"/>
-    </body>
-    <body name="obstacle_5" pos="-2 3 0.5">
-        <geom name="obs5" type="cylinder" size="0.15 0.4" rgba="0 0 1 1"/>
-    </body>
-    <body name="obstacle_6" pos="5 0 0.5">
-        <geom name="obs6" type="cylinder" size="0.25 0.6" rgba="1 1 0 1"/>
-    </body>
-    <body name="obstacle_7" pos="-3 -3 0.5">
-        <geom name="obs7" type="cylinder" size="0.2 0.8" rgba="1 0 1 1"/>
-    </body>
-    <body name="obstacle_8" pos="0 5 0.5">
-        <geom name="obs8" type="cylinder" size="0.4 0.3" rgba="0 1 1 1"/>
-    </body>
-    <body name="obstacle_9" pos="8 -1 0.5">
-        <geom name="obs9" type="cylinder" size="0.3 0.5" rgba="0.5 0.5 0 1"/>
-    </body>
-
+       <body name="obstacle_1" pos="2 2 0.5">
+            <geom name="obs1" type="cylinder" size="0.2 0.5" rgba="1 0 0 1" contype="1" conaffinity="1"/>
+        </body>
+        <body name="obstacle_2" pos="4 4 0.5">
+            <geom name="obs2" type="cylinder" size="0.2 0.5" rgba="1 0 0 1" contype="1" conaffinity="1"/>
+        </body>
+        <body name="obstacle_3" pos="6 6 0.5">
+            <geom name="obs3" type="cylinder" size="0.2 0.5" rgba="1 0 0 1" contype="1" conaffinity="1"/>
+        </body>
+        <body name="obstacle_4" pos="3 -2 0.5">
+            <geom name="obs4" type="cylinder" size="0.3 0.7" rgba="0 1 0 1" contype="1" conaffinity="1"/>
+        </body>
+        <body name="obstacle_5" pos="-2 3 0.5">
+            <geom name="obs5" type="cylinder" size="0.15 0.4" rgba="0 0 1 1" contype="1" conaffinity="1"/>
+        </body>
+        <body name="obstacle_6" pos="5 0 0.5">
+            <geom name="obs6" type="cylinder" size="0.25 0.6" rgba="1 1 0 1" contype="1" conaffinity="1"/>
+        </body>
+        <body name="obstacle_7" pos="-3 -3 0.5">
+            <geom name="obs7" type="cylinder" size="0.2 0.8" rgba="1 0 1 1" contype="1" conaffinity="1"/>
+        </body>
+        <body name="obstacle_8" pos="0 5 0.5">
+            <geom name="obs8" type="cylinder" size="0.4 0.3" rgba="0 1 1 1" contype="1" conaffinity="1"/>
+        </body>
+        <body name="obstacle_9" pos="8 -1 0.5">
+            <geom name="obs9" type="cylinder" size="0.3 0.5" rgba="0.5 0.5 0 1" contype="1" conaffinity="1"/>
+        </body>
+    
 </worldbody>
   <actuator>
     <motor ctrllimited="true" ctrlrange="-1.0 1.0" joint="hip_4" gear="150"/>
