@@ -11,8 +11,8 @@ env = gym.make(
 )
 
 
-num_timesteps = 20_000
-model = SAC("MlpPolicy", env, verbose=1, device="cuda", train_freq=1)
+num_timesteps = 40_000
+model = SAC("MlpPolicy", env, verbose=1, device="cuda", train_freq=4)
 model.learn(total_timesteps=num_timesteps)
 model.save("ppo_inverted_double_pendulum")
 
