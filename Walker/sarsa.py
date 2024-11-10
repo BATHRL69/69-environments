@@ -1,10 +1,14 @@
 import gymnasium as gym
 import numpy as np
+import os
+import pickle
 import random
 
-class SarsaAgent:
+from Walker.agent import Agent
 
-  def __init__(self, env: gym.Env, n_actions = 20, alpha=0.5, gamma=0.99, epsilon=0.1):
+class SarsaAgent(Agent):
+
+  def __init__(self, env: gym.Env, n_actions=50, alpha=0.1, gamma=0.99, epsilon=0.1):
     self.env = env
     self.n_actions = n_actions
     self.alpha = alpha
@@ -56,28 +60,33 @@ class SarsaAgent:
       state = new_state
       action = new_action
       continuous_action = self.get_continuous_action(action)
-
-
-  def train(self, num_episodes=1000):
-    ten_percent = int(num_episodes / 10)
-
-    for i in range(num_episodes):
-      self.simulate_episode()
-
-      if i % ten_percent == 0:
-        print(f"Training {10 * i / ten_percent}% complete...")
   
 
   def predict(self, state):
     state = self.get_discrete_state(state)
     action = self.choose_action(state, epsilon_override=0)
     return [self.get_continuous_action(action)]
+  
+
+  def save(self, path):
+    print(f"Saving model to {path}...")
+    with open(path, "wb") as file:
+      pickle.dump(self.q_table, file)
+    print("Done!")
+
+
+  def load(self, path):
+    if os.path.exists(path):
+      print(f"Loading model from {path}...")
+      with open(path, "rb") as file:
+        self.q_table = pickle.load(file)
+      print("Done!")
 
 
 
-class NStepSarsaAgent:
+class NStepSarsaAgent(Agent):
 
-  def __init__(self, env: gym.Env, n_actions=20, alpha=0.5, gamma=0.99, epsilon=0.1, lamb=0.9):
+  def __init__(self, env: gym.Env, n_actions=50, alpha=0.1, gamma=0.99, epsilon=0.1, lamb=0.9):
     self.env = env
     self.n_actions = n_actions
     self.alpha = alpha
@@ -121,7 +130,7 @@ class NStepSarsaAgent:
 
     for s, actions in self.q_table.items():
         for a, _ in actions.items():
-            self.trace_table[s][a] = 0
+            self.trace_table[s] = {a : 0 for a in actions}
 
     state, _ = self.env.reset()
     state = self.get_discrete_state(state)
@@ -147,19 +156,24 @@ class NStepSarsaAgent:
       state = new_state
       action = new_action
       continuous_action = self.get_continuous_action(action)
-
-
-  def train(self, num_episodes=1000):
-    ten_percent = int(num_episodes / 10)
-
-    for i in range(num_episodes):
-      self.simulate_episode()
-
-      if i % ten_percent == 0:
-        print(f"Training {10 * i / ten_percent}% complete...")
   
 
   def predict(self, state):
     state = self.get_discrete_state(state)
     action = self.choose_action(state, epsilon_override=0)
     return [self.get_continuous_action(action)]
+
+  
+  def save(self, path):
+    print(f"Saving model to {path}...")
+    with open(path, "wb") as file:
+      pickle.dump(self.q_table, file)
+    print("Done!")
+
+
+  def load(self, path):
+    if os.path.exists(path):
+      print(f"Loading model from {path}...")
+      with open(path, "rb") as file:
+        self.q_table = pickle.load(file)
+      print("Done!")
