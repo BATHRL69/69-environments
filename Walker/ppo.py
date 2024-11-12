@@ -11,8 +11,32 @@ from agent import Agent
 import pickle
 import os
 import torch
+import torch.nn as nn
+
 from enum import Enum
 from ppo_constants import *
+
+
+class PPOPolicyNetwork(nn.Module):
+    """This is sometimes also called the ACTOR network
+
+    Args:
+        nn (_type_): _description_
+    """
+
+    def __init__(self):
+        pass
+
+
+class PPOValueNetwork(nn.Module):
+    """This is sometimes also called the CRITIC network
+
+    Args:
+        nn (_type_): _description_
+    """
+
+    def __init__(self):
+        pass
 
 
 class PPOAgent(Agent):
