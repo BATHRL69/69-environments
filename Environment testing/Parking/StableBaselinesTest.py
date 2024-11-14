@@ -23,7 +23,7 @@ from stable_baselines3.common.evaluation import evaluate_policy
 
 type_proportion = 1.0
 render_mode = ["rgb_array", "human"][0]
-render_fps = 10
+render_fps = 1000
 max_step = 1000
 env = ParkingEnv(
     type_proportion=type_proportion,
@@ -46,7 +46,7 @@ model = PPO(
     device=device,
 )
 
-num_timesteps = 100
+num_timesteps = 10000
 model.learn(total_timesteps=num_timesteps)
 
 model.save("ppo_parking")
