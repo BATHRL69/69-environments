@@ -1,6 +1,18 @@
-import torch.nn as nn
+import gymnasium as gym
 import torch
-from agent import Agent 
+import torch.nn as nn
+
+from agent import Agent
+from typing import NamedTuple, Any
+
+
+class Experience(NamedTuple):
+    old_state: Any
+    new_state: Any
+    action: Any
+    reward: float
+    is_terminal: bool
+
 
 class SACPolicyNetwork(nn.Module):
     def __init__(self):
@@ -22,18 +34,43 @@ class SACValueNetwork(nn.module):
     def __init__(self):
         pass
 
+
 class SACAgent(Agent):
-    def __init__(self, env):
+    def __init__(self, env: gym.Env, update_threshold: int):
         self.env = env
+        self.update_threshold = update_threshold
+        self.replay_buffer = []
+
         self.actor = SACPolicyNetwork()
         self.critic_1 = SACValueNetwork()
         self.critic_2 = SACValueNetwork()
         self.critic_target_1 = SACValueNetwork()
         self.critic_target_2 = SACValueNetwork()
+
     
     def simulate_episode(self):
-        """Run a single training episode."""
-        raise NotImplementedError
+        is_finished = False
+        is_truncated = False
+
+        state, _ = self.env.reset()
+        timestep = 0
+
+        while True:
+            timestep += 1
+
+            action = self.actor.forward(state, train=False)
+            new_state, reward, is_finished, is_truncated, _ = self.env.step(action)
+            self.replay_buffer.append(Experience(state, new_state, action, reward, is_finished))
+
+            if is_finished or is_truncated:
+                break
+
+            if timestep % self.update_threshold != 0:
+                continue
+
+            # update
+
+
 
     def predict(self, state):
         """Predict the best action for the current state."""
