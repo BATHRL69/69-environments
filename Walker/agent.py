@@ -3,15 +3,17 @@ class Agent:
         """Run a single training episode."""
         raise NotImplementedError
 
-    def train(self, num_episodes=1000):
+    def train(self, num_timesteps=100000, print_interval=50):
         """Train the agent over a given number of episodes."""
-        ten_percent = min(1, int(num_episodes / 10)) # in case num_episodes < 10 and we try to divide by 0
+        timesteps = 0
+        episodes = 0
 
-        for i in range(num_episodes):
-            self.simulate_episode()
+        while timesteps < num_timesteps:
+            timesteps += self.simulate_episode()
+            episodes += 1
 
-            if i % ten_percent == 0:
-                print(f"Training {10 * i / ten_percent}% complete...")
+            if (episodes % print_interval == 0):
+                print(f"Training {timesteps / num_timesteps}% complete...")
 
     def predict(self, state):
         """Predict the best action for the current state."""
