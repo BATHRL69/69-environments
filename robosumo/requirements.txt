@@ -1,7 +1,8 @@
-mujoco-py<2.2,>=2.1
-gym
 stable-baselines[mpi]
-numpy
 click
-# for using pre-trained policies:
-tensorflow>=1.1.0
+gym
+mujoco
+numpy
+tensorflow==1.13.2
+shimmy[gym-v26]
+shimmy[gym-v21]
