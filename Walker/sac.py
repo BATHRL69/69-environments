@@ -1,17 +1,26 @@
 import torch.nn as nn
+import torch
+from agent import Agent 
 
-from agent import Agent
-
-
-class SACPolicyNetwork(nn.module):
+class SACPolicyNetwork(nn.Module):
     def __init__(self):
-        pass
+        super(SACPolicyNetwork,self).__init__()
+        self._input_dim = 100 #change these values later
+        self.ann = nn.Sequential(
+            nn.Linear(self._embeddings_dim, self._mlp_input_dim),
+            nn.ReLU(),
+            nn.Linear(self._mlp_input_dim, 1),
+            nn.Sigmoid(),
+        )
+
+    def forward(self,input:torch.Tensor)->torch.Tensor:
+        x = self.ann(input)
+        return x
 
 
 class SACValueNetwork(nn.module):
     def __init__(self):
         pass
-
 
 class SACAgent(Agent):
     def __init__(self, env):
