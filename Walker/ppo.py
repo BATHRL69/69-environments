@@ -41,7 +41,7 @@ class PPOPolicyNetwork(nn.Module):
             nn.Tanh(),  # Ant action space is -1 to 1
         )
 
-    def action(self, state):
+    def get_action(self, state):
         """Given a state, gets an action, sampled from normal distribution
 
         Args:
@@ -60,7 +60,6 @@ class PPOPolicyNetwork(nn.Module):
         pass
 
     def forward(self, state):
-        raise NotImplementedError()
         return self.network(state)
 
 
@@ -84,6 +83,9 @@ class PPOValueNetwork(nn.Module):
             nn.linear(32, 1),
         )
 
+    def forward(self, state):
+        return self.network(state)
+
 
 class PPOAgent(Agent):
     def __init__(
@@ -92,8 +94,8 @@ class PPOAgent(Agent):
         epsilon=0.001,
         gamma=0.99,
     ):
-        self.policy_network = None
-        self.value_network = None
+        self.policy_network = PPOPolicyNetwork()
+        self.value_network = PPOValueNetwork()
         self.env = env
         self.epsilon = epsilon  # How large of a step we will take with updates
         self.gamma = gamma  # Discount factor
@@ -144,14 +146,21 @@ class PPOAgent(Agent):
     def update_value(self):
         pass
 
-    def create_episode(self):
-        pass
-
-    def ppo_clip(self, state, action):
-        pass
-
     def simulate_episode(self):
         """Simulate a single episode, called by train method on parent class"""
+
+        is_finished = False
+        is_truncated = False
+        state, _ = self.env.reset()
+        action, _ = self.policy_network.get_action(state)
+        while not is_finished and not is_truncated:
+            new_state, reward, is_finished, is_truncated, _ = self.env.step([action])
+
+            ## TODO update here
+            state = new_state
+            action = new_action
+
+    def ppo_clip(self, state, action):
         pass
 
     def predict(self):
