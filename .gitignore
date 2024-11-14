@@ -3,3 +3,5 @@ logs/
 venv
 Environment testing/Arcade games/Wrestelmania/*
 Walker/.venv/
+Walker/Mujoco-Pytorch-main/*
+.idea
