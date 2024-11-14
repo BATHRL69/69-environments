@@ -1,22 +1,27 @@
 """
-Policy classes.
+Policy classes updated for TensorFlow 2.x.
 """
+
 import tensorflow as tf
 import numpy as np
 import gym
 import logging
 import copy
+import tensorflow_probability as tfp
 
-from tensorflow.contrib import layers
+from .utils import RunningMeanStd  # Ensure this is compatible with TF 2.x
 
-from .utils import *
+tfd = tfp.distributions
 
 
-class Policy(object):
+class Policy:
     def reset(self, **kwargs):
         pass
 
     def act(self, observation):
+        raise NotImplementedError
+
+    def get_variables(self):
         raise NotImplementedError
 
 
@@ -24,176 +29,190 @@ class MLPPolicy(Policy):
     def __init__(self, scope, *, ob_space, ac_space, hiddens,
                  normalize=False,
                  reuse=False):
+        super().__init__()
         self.recurrent = False
         self.normalized = normalize
 
-        with tf.variable_scope(scope, reuse=reuse):
-            self.scope = tf.get_variable_scope().name
+        self.scope = scope
 
-            self.observation_ph = tf.placeholder(
-                tf.float32, [None] + list(ob_space.shape), name="observation")
-            self.taken_action_ph = tf.placeholder(
-                tf.float32, [None, ac_space.shape[0]], name="taken_action")
-            self.stochastic_ph = tf.placeholder(tf.bool, (), name="stochastic")
+        # Observation and action dimensions
+        self.ob_dim = ob_space.shape[0]
+        self.ac_dim = ac_space.shape[0]
 
-            if self.normalized:
-                if self.normalized != 'ob':
-                    self.ret_rms = RunningMeanStd(scope="retfilter")
-                self.ob_rms = RunningMeanStd(
-                    scope="obsfilter", shape=ob_space.shape)
+        if self.normalized:
+            if self.normalized != 'ob':
+                self.ret_rms = RunningMeanStd(shape=())
+            self.ob_rms = RunningMeanStd(shape=ob_space.shape)
 
-            # Observation filtering
-            obz = self.observation_ph
-            if self.normalized:
-                obz = tf.clip_by_value((self.observation_ph - self.ob_rms.mean) / self.ob_rms.std, -5.0, 5.0)
+        # Build policy network
+        self.policy_layers = []
+        for i, hid_size in enumerate(hiddens):
+            self.policy_layers.append(tf.keras.layers.Dense(
+                hid_size, activation='tanh', name=f'{self.scope}_polfc{i+1}'))
+        self.policy_mean = tf.keras.layers.Dense(
+            self.ac_dim, name=f'{self.scope}_polfinal')
 
-            # Value
-            last_out = obz
-            for i, hid_size in enumerate(hiddens):
-                last_out = tf.nn.tanh(
-                    dense(last_out, hid_size, "vffc%i" % (i + 1)))
-            self.vpredz = dense(last_out, 1, "vffinal")[:, 0]
+        # Build value network
+        self.value_layers = []
+        for i, hid_size in enumerate(hiddens):
+            self.value_layers.append(tf.keras.layers.Dense(
+                hid_size, activation='tanh', name=f'{self.scope}_vffc{i+1}'))
+        self.value_output = tf.keras.layers.Dense(1, name=f'{self.scope}_vffinal')
 
-            self.vpred = self.vpredz
-            if self.normalized and self.normalized != 'ob':
-                self.vpred = self.vpredz * self.ret_rms.std + self.ret_rms.mean
+        # Log std variable
+        self.logstd = tf.Variable(
+            initial_value=tf.zeros([1, self.ac_dim]), name=f'{self.scope}_logstd')
 
-            # Policy
-            last_out = obz
-            for i, hid_size in enumerate(hiddens):
-                last_out = tf.nn.tanh(
-                    dense(last_out, hid_size, "polfc%i" % (i + 1)))
-            mean = dense(last_out, ac_space.shape[0], "polfinal")
-            logstd = tf.get_variable(
-                name="logstd",
-                shape=[1, ac_space.shape[0]],
-                initializer=tf.zeros_initializer())
+    def call(self, observations, stochastic=True):
+        # observations is a batch of observations
+        obz = observations
+        if self.normalized:
+            obz = tf.clip_by_value(
+                (observations - self.ob_rms.mean) / self.ob_rms.std, -5.0, 5.0)
 
-            self.pd = DiagonalGaussian(mean, logstd)
-            self.sampled_action = switch(
-                self.stochastic_ph, self.pd.sample(), self.pd.mode())
+        # Compute value
+        v = obz
+        for layer in self.value_layers:
+            v = layer(v)
+        vpredz = tf.squeeze(self.value_output(v), axis=-1)
+        if self.normalized and self.normalized != 'ob':
+            vpred = vpredz * self.ret_rms.std + self.ret_rms.mean
+        else:
+            vpred = vpredz
+
+        # Compute policy mean
+        p = obz
+        for layer in self.policy_layers:
+            p = layer(p)
+        mean = self.policy_mean(p)
+        logstd = self.logstd
+
+        # Create a distribution
+        dist = tfd.MultivariateNormalDiag(
+            loc=mean, scale_diag=tf.exp(logstd))
+        if stochastic:
+            action = dist.sample()
+        else:
+            action = dist.mean()
+        return action, vpred
 
     def act(self, observation, stochastic=True):
-        outputs = [self.sampled_action, self.vpred]
-        feed_dict = {
-            self.observation_ph: observation[None],
-            self.stochastic_ph: stochastic,
-        }
-        a, v = tf.get_default_session().run(outputs, feed_dict)
-        return a[0], {'vpred': v[0]}
+        observation = np.array(observation)
+        observation = observation.reshape(1, -1)  # Ensure batch dimension
+        action, vpred = self.call(observation, stochastic=stochastic)
+        # Since we are in eager mode, action and vpred are tensors
+        action = action.numpy()[0]
+        vpred = vpred.numpy()[0]
+        return action, {'vpred': vpred}
+
+    def reset(self, **kwargs):
+        pass
 
     def get_variables(self):
-        return tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, self.scope)
+        return [var for var in self.__dict__.values() if isinstance(var, tf.Variable)] + \
+               [var for layer in self.policy_layers + self.value_layers for var in layer.trainable_variables] + \
+               self.policy_mean.trainable_variables + \
+               self.value_output.trainable_variables
 
 
 class LSTMPolicy(Policy):
     def __init__(self, scope, *, ob_space, ac_space, hiddens,
                  reuse=False, normalize=False):
+        super().__init__()
         self.recurrent = True
         self.normalized = normalize
 
-        with tf.variable_scope(scope, reuse=reuse):
-            self.scope = tf.get_variable_scope().name
+        self.scope = scope
 
-            self.observation_ph = tf.placeholder(
-                tf.float32, [None, None] + list(ob_space.shape),
-                name="observation")
-            self.taken_action_ph = tf.placeholder(
-                tf.float32, [None, None, ac_space.shape[0]],
-                name="taken_action")
-            self.stochastic_ph = tf.placeholder(tf.bool, (), name="stochastic")
+        # Observation and action dimensions
+        self.ob_dim = ob_space.shape[0]
+        self.ac_dim = ac_space.shape[0]
 
-            if self.normalized:
-                if self.normalized != 'ob':
-                    self.ret_rms = RunningMeanStd(scope="retfilter")
-                self.ob_rms = RunningMeanStd(
-                    scope="obsfilter",
-                    shape=ob_space.shape)
+        if self.normalized:
+            if self.normalized != 'ob':
+                self.ret_rms = RunningMeanStd(shape=())
+            self.ob_rms = RunningMeanStd(shape=ob_space.shape)
 
-            # Observation filtering
-            obz = self.observation_ph
-            if self.normalized:
-                obz = tf.clip_by_value((self.observation_ph - self.ob_rms.mean) / self.ob_rms.std, -5.0, 5.0)
+        # Build embedding layers (before LSTM)
+        self.embedding_layers = []
+        for i, hid_size in enumerate(hiddens[:-1]):
+            self.embedding_layers.append(
+                tf.keras.layers.Dense(hid_size, activation='tanh', name=f'{self.scope}_emb_fc{i+1}'))
 
-            # Embedding
-            last_out = obz
-            for hidden in hiddens[:-1]:
-                last_out = tf.contrib.layers.fully_connected(last_out, hidden)
+        lstm_hidden_size = hiddens[-1]
 
-            self.zero_state = []
-            self.state_in_ph = []
-            self.state_out = []
+        # Value LSTM cell
+        self.value_lstm_cell = tf.keras.layers.LSTMCell(
+            lstm_hidden_size, name=f'{self.scope}_lstmv')
 
-            # Value
-            cell = tf.contrib.rnn.BasicLSTMCell(hiddens[-1], reuse=reuse)
-            size = cell.state_size
-            self.zero_state.append(np.zeros(size.c, dtype=np.float32))
-            self.zero_state.append(np.zeros(size.h, dtype=np.float32))
-            self.state_in_ph.append(
-                tf.placeholder(tf.float32, [None, size.c], name="lstmv_c"))
-            self.state_in_ph.append(
-                tf.placeholder(tf.float32, [None, size.h], name="lstmv_h"))
-            initial_state = tf.contrib.rnn.LSTMStateTuple(
-                self.state_in_ph[-2], self.state_in_ph[-1])
-            last_out, state_out = tf.nn.dynamic_rnn(
-                cell, last_out, initial_state=initial_state, scope="lstmv")
-            self.state_out.append(state_out)
+        # Value output layer
+        self.value_output = tf.keras.layers.Dense(1, name=f'{self.scope}_vffinal')
 
-            self.vpredz = tf.contrib.layers.fully_connected(last_out, 1, activation_fn=None)[:, :, 0]
-            self.vpred = self.vpredz
-            if self.normalized and self.normalized != 'ob':
-                self.vpred = self.vpredz * self.ret_rms.std + self.ret_rms.mean
+        # Policy LSTM cell
+        self.policy_lstm_cell = tf.keras.layers.LSTMCell(
+            lstm_hidden_size, name=f'{self.scope}_lstmp')
 
-            # Policy
-            last_out = obz
-            for hidden in hiddens[:-1]:
-                last_out = tf.contrib.layers.fully_connected(last_out, hidden)
-            cell = tf.contrib.rnn.BasicLSTMCell(hiddens[-1], reuse=reuse)
-            size = cell.state_size
-            self.zero_state.append(np.zeros(size.c, dtype=np.float32))
-            self.zero_state.append(np.zeros(size.h, dtype=np.float32))
-            self.state_in_ph.append(
-                tf.placeholder(tf.float32, [None, size.c], name="lstmp_c"))
-            self.state_in_ph.append(
-                tf.placeholder(tf.float32, [None, size.h], name="lstmp_h"))
-            initial_state = tf.contrib.rnn.LSTMStateTuple(
-                self.state_in_ph[-2], self.state_in_ph[-1])
-            last_out, state_out = tf.nn.dynamic_rnn(
-                cell, last_out, initial_state=initial_state, scope="lstmp")
-            self.state_out.append(state_out)
+        # Policy mean output layer
+        self.policy_mean = tf.keras.layers.Dense(self.ac_dim, name=f'{self.scope}_polfinal')
 
-            mean = tf.contrib.layers.fully_connected(
-                last_out, ac_space.shape[0], activation_fn=None)
-            logstd = tf.get_variable(
-                name="logstd",
-                shape=[1, ac_space.shape[0]],
-                initializer=tf.zeros_initializer())
+        # Log std variable
+        self.logstd = tf.Variable(
+            initial_value=tf.zeros([1, self.ac_dim]), name=f'{self.scope}_logstd')
 
-            self.pd = DiagonalGaussian(mean, logstd)
-            self.sampled_action = switch(
-                self.stochastic_ph, self.pd.sample(), self.pd.mode())
+        # Initialize states
+        self.value_state = None
+        self.policy_state = None
 
-            self.zero_state = np.array(self.zero_state)
-            self.state_in_ph = tuple(self.state_in_ph)
-            self.state = self.zero_state
+        self.reset()
 
     def act(self, observation, stochastic=True):
-        outputs = [self.sampled_action, self.vpred, self.state_out]
-        feed_dict = {
-            self.observation_ph: observation[None, None],
-            self.state_in_ph: list(self.state[:, None, :]),
-            self.stochastic_ph: stochastic,
-        }
-        a, v, s = tf.get_default_session().run(outputs, feed_dict)
-        self.state = []
-        for x in s:
-            self.state.append(x.c[0])
-            self.state.append(x.h[0])
-        self.state = np.array(self.state)
-        return a[0, 0], {'vpred': v[0, 0], 'state': self.state}
+        observation = np.array(observation).reshape(1, -1)
+        obz = observation.astype(np.float32)
+        if self.normalized:
+            obz = tf.clip_by_value(
+                (obz - self.ob_rms.mean.numpy()) / self.ob_rms.std.numpy(), -5.0, 5.0)
 
-    def get_variables(self):
-        return tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, self.scope)
+        # Embedding
+        x = obz
+        for layer in self.embedding_layers:
+            x = layer(x)
+
+        # Value
+        v_output, self.value_state = self.value_lstm_cell(
+            x, states=self.value_state)
+        vpredz = tf.squeeze(self.value_output(v_output), axis=-1)
+        if self.normalized and self.normalized != 'ob':
+            vpred = vpredz * self.ret_rms.std + self.ret_rms.mean
+        else:
+            vpred = vpredz
+
+        # Policy
+        p_output, self.policy_state = self.policy_lstm_cell(
+            x, states=self.policy_state)
+        mean = self.policy_mean(p_output)
+        logstd = self.logstd
+
+        dist = tfd.MultivariateNormalDiag(
+            loc=mean, scale_diag=tf.exp(logstd))
+        if stochastic:
+            action = dist.sample()
+        else:
+            action = dist.mean()
+
+        action = action.numpy()[0]
+        vpred = vpred.numpy()[0]
+
+        return action, {'vpred': vpred}
 
     def reset(self):
-        self.state = self.zero_state
+        self.value_state = self.value_lstm_cell.get_initial_state(batch_size=1, dtype=tf.float32)
+        self.policy_state = self.policy_lstm_cell.get_initial_state(batch_size=1, dtype=tf.float32)
+
+    def get_variables(self):
+        return [var for var in self.__dict__.values() if isinstance(var, tf.Variable)] + \
+               [var for layer in self.embedding_layers for var in layer.trainable_variables] + \
+               self.value_lstm_cell.trainable_variables + \
+               self.policy_lstm_cell.trainable_variables + \
+               self.value_output.trainable_variables + \
+               self.policy_mean.trainable_variables
+
