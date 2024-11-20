@@ -7,13 +7,20 @@ class Agent:
         """Train the agent over a given number of episodes."""
         timesteps = 0
         episodes = 0
+        reward_total = 0
 
         while timesteps < num_timesteps:
-            timesteps += self.simulate_episode()
+            elapsed_timesteps, reward = self.simulate_episode()
+            timesteps += elapsed_timesteps
+            reward_total += reward
             episodes += 1
 
             if (episodes % print_interval == 0):
                 print(f"Training {100 * timesteps / num_timesteps:.2f}% complete...")
+                print(f"Average reward of {reward_total / print_interval} received")
+
+                reward_total = 0
+
 
     def predict(self, state):
         """Predict the best action for the current state."""

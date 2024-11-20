@@ -46,7 +46,7 @@ class ReplayBuffer():
     
     def get(self, batch_size: int):
         valid_entries = min(self.counter, self.max_capacity)
-        indices = np.random.sample(list(range(valid_entries)), batch_size)
+        indices = np.random.choice(list(range(valid_entries)), batch_size)
         return self.old_state_buffer[indices], self.new_state_buffer[indices], self.action_buffer[indices], self.reward_buffer[indices], self.is_terminal_buffer[indices]
 
 
@@ -55,7 +55,7 @@ class SACPolicyLoss(nn.Module):
         super(SACPolicyLoss, self).__init__()
     
     def forward(self, min_critic, entropy, alpha):
-        return min_critic - alpha * entropy
+        return torch.mean(min_critic - alpha * entropy,dim=0)
 
 
 class SACPolicyNetwork(nn.Module):
@@ -77,7 +77,6 @@ class SACPolicyNetwork(nn.Module):
         self.log_std_dev = nn.Linear(self._hidden_units, self._action_dim)
 
     def forward(self, state:torch.Tensor, train:bool=True)->torch.Tensor:
-        #state.unsqueeze(0)
         out = self.ann(state) # samples a prob dis
         mean = self.mean(out)
         ## why log std and why not std
@@ -116,11 +115,11 @@ class SACValueNetwork(nn.Module):
 
 
 class SACAgent(Agent):
-    # TODO: count timesteps across episodes, not within - agent still needs to learn on short episodes
 
     def __init__(self, env: gym.Env, update_threshold: int = 100, batch_size: int = 256, alpha: float = 1e-4, gamma: float = 0.99, polyak = 0.99):
         # line 1 of pseudocode
         self.env = env
+        self.persistent_timesteps = 0
         self.update_threshold = update_threshold
         self.batch_size = batch_size
         self.alpha = alpha
@@ -160,6 +159,7 @@ class SACAgent(Agent):
     def simulate_episode(self, skip_update=False):
         is_finished = False
         is_truncated = False
+        reward_history = []
 
         state, _ = self.env.reset()
         state = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
@@ -168,6 +168,7 @@ class SACAgent(Agent):
         # line 3 of pseudocode
         while True:
             timestep += 1
+            self.persistent_timesteps += 1
 
             # line 4 of pseudocode
             action = self.actor.sample(state)[0].detach().numpy()
@@ -175,6 +176,7 @@ class SACAgent(Agent):
             # line 5-6 of pseudocode
             new_state, reward, is_finished, is_truncated, _ = self.env.step(action[0])
             new_state = torch.tensor(new_state, dtype=torch.float32).unsqueeze(0)
+            reward_history.append(reward)
 
             # line 7 of pseudocode
             self.replay_buffer.add(Experience(state[0], new_state[0], action, reward, is_finished))
@@ -184,24 +186,29 @@ class SACAgent(Agent):
                 break
 
             # line 9 of pseudocode
-            if skip_update or timestep % self.update_threshold != 0:
+            if skip_update or self.persistent_timesteps % self.update_threshold != 0:
                 continue
 
             # line 11 of pseudocode
             old_states, new_states, actions, rewards, terminals = self.replay_buffer.get(self.batch_size)
+            old_states = torch.tensor(old_states, dtype=torch.float32)
+            new_states = torch.tensor(new_states, dtype=torch.float32)
+            actions = torch.tensor(actions, dtype=torch.float32)
+            rewards = torch.tensor(rewards, dtype=torch.float32).unsqueeze(1)
+            terminals = torch.tensor(terminals, dtype=torch.float32).unsqueeze(1)
 
             # line 12 of pseudocode
             actor_prediction_new, log_actor_probability_new = self.actor.forward(new_states, train=False)
-            critic_target_1_prediction = self.critic_target_1.forward(new_states, actor_prediction_new, train=False)
-            critic_target_2_prediction = self.critic_target_2.forward(new_states, actor_prediction_new, train=False)
-            critic_target_clipped = min(critic_target_1_prediction, critic_target_2_prediction)
+            critic_target_1_prediction = self.critic_target_1.forward(new_states, actor_prediction_new)
+            critic_target_2_prediction = self.critic_target_2.forward(new_states, actor_prediction_new)
+            critic_target_clipped = torch.min(critic_target_1_prediction, critic_target_2_prediction)
             predicted_target_reward = critic_target_clipped - self.alpha * log_actor_probability_new
             target = rewards + self.gamma * (1 - terminals) * predicted_target_reward
 
             # line 13 of pseudocode
             # TODO: batch norm
-            critic_1_evaluation = self.critic_1.forward(old_states, actions, train=False)
-            critic_2_evaluation = self.critic_2.forward(old_states, actions, train=False)
+            critic_1_evaluation = self.critic_1.forward(old_states, actions)
+            critic_2_evaluation = self.critic_2.forward(old_states, actions)
 
             critic_1_loss = self.critic_1_loss(target, critic_1_evaluation)
             critic_2_loss = self.critic_2_loss(target, critic_2_evaluation)
@@ -209,18 +216,18 @@ class SACAgent(Agent):
             self.critic_1_optimiser.zero_grad()
             self.critic_2_optimiser.zero_grad()
 
-            critic_1_loss.backward()
-            critic_2_loss.backward()
-
+            total_loss = critic_1_loss + critic_2_loss
+            total_loss.backward()
+            
             self.critic_1_optimiser.step()
             self.critic_2_optimiser.step()
 
             # line 14 of pseudocode
             # TODO: batch norm
             actor_prediction_old, log_actor_probability_old = self.actor.forward(old_states, train=False)
-            critic_1_prediction = self.critic_1.forward(old_states, actor_prediction_old, train=False)
-            critic_2_prediction = self.critic_2.forward(old_states, actor_prediction_old, train=False)
-            critic_clipped = min(critic_1_prediction, critic_2_prediction)
+            critic_1_prediction = self.critic_1.forward(old_states, actor_prediction_old)
+            critic_2_prediction = self.critic_2.forward(old_states, actor_prediction_old)
+            critic_clipped = torch.min(critic_1_prediction, critic_2_prediction)
 
             actor_loss = self.actor_loss(critic_clipped, log_actor_probability_old, self.alpha)
 
@@ -233,16 +240,18 @@ class SACAgent(Agent):
             
             state = new_state
 
-        return timestep
+        return timestep, sum(reward_history)
 
 
-    def train(self, num_timesteps=100000, print_interval=50, start_timesteps=10000):
+    def train(self, num_timesteps=100000, print_interval=50, start_timesteps=1000):
         """Train the agent over a given number of episodes."""
+        self.persistent_timesteps = 0
         timesteps = 0
         episodes = 0
 
         while timesteps < start_timesteps:
-            timesteps += self.simulate_episode(skip_update=True)
+            elapsed_timesteps, _ = self.simulate_episode(skip_update=True)
+            timesteps += elapsed_timesteps
             episodes += 1
 
             if (episodes % print_interval == 0):
