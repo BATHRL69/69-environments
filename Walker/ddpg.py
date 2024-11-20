@@ -15,7 +15,28 @@ class DDPGAgent(Agent):
         # give it the open ai environment, observation
         pass
 
-    def loss(self):
+    def critic_loss(self, data):
+
+        # extract observations from data
+
+
+        #  for observations in data:
+
+            # current_state, action, reward, next_state, d = observation
+
+            # calculate pred = critic(current_state, action)
+
+            # calculate loss += (pred - (r + gamma*(1 - d)*target_critic(next_state, target_actor(next_state))))
+
+        # loss = loss / number of observations
+
+        # return loss
+
+        pass
+
+    def actor_loss(self):
+
+        
         pass
 
     def train(self, num_episodes=1000):
@@ -25,11 +46,51 @@ class DDPGAgent(Agent):
             pass
 
 class ActorNetwork(nn.Module):
-    pass
+    
+    def __init__(self, hidden_size, activation, action_dim, state_dim):
+        super().__init__()
+        input_size = state_dim
+        output_size = action_dim
+        layers = []
+        
+        layers.append(nn.Linear(input_size, hidden_size[0])) # input layer
+        layers.append(activation)
+
+        for i in range(0, len(hidden_size) - 2):
+            layers.append(nn.Linear(hidden_size[i], hidden_size[i+1]))
+            layers.append(activation)
+
+        layers.append(nn.Linear(hidden_size[-1], output_size)) # output layer
+
+        self.network = nn.Sequential(*layers) # unpack layers and activation functions into sequential
+    
+
+    def forward(self, x):
+        return self.network(x)
 
 
 class CriticNetwork(nn.Module):
-    pass
+    
+    def __init__(self, hidden_size, activation, action_dim, state_dim):
+        super().__init__()
+        input_size = action_dim + state_dim
+        output_size = 1 # critic network just outputs a value
+        layers = []
+
+        layers.append(nn.Linear(input_size, hidden_size[0])) # input layer
+        layers.append(activation)
+
+        for i in range(0, len(hidden_size) - 2):
+            layers.append(nn.Linear(hidden_size[i], hidden_size[i+1]))
+            layers.append(activation)
+
+        layers.append(nn.Linear(hidden_size[-1], output_size)) # output layer
+
+        self.network = nn.Sequential(*layers) # unpack layers and activation functions into sequential
+    
+
+    def forward(self, x):
+        return self.network(x)
 
 if __name__ == "__main__":
     pass
