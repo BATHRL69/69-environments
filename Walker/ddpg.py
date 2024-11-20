@@ -1,18 +1,20 @@
 import torch
 import torch.nn as nn
+from torch.optim import Adam
+from torch.nn import ReLU
 import gymnasium as gym
 import copy
 from typing import Tuple, List
 import numpy as np
-from torch.optim import Adam
-
-#
-# https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/algos/pytorch/ddpg/core.py
-# https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/algos/pytorch/ddpg/ddpg.py
+import random
+from tqdm import tqdm
 
 from agent import Agent
-import random
+
 random.seed(0)
+
+# https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/algos/pytorch/ddpg/core.py
+# https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/algos/pytorch/ddpg/ddpg.py
 
 class ReplayBuffer:
 
@@ -41,16 +43,18 @@ class ReplayBuffer:
 
 class DDPGAgent(Agent):
 
+    hidden_size = (256, 256)
+
     def __init__(
             self,
-            action_space,
-            observation_space,
-            max_buffer_size: int,
-            replay_sample_size: int,
-            actor_lr: float,
-            critic_lr: float,
+            env,
+            max_buffer_size: int = 100000,
+            replay_sample_size: int = 10,
+            actor_lr: float = 0.0001,
+            critic_lr: float = 0.0001,
             polyak: float = 0.995,
-            gamma: float = 0.99
+            gamma: float = 0.99,
+            training_frequency: int = 10
     ):
         # set hyperparams
         self.max_buffer_size = max_buffer_size
@@ -59,22 +63,35 @@ class DDPGAgent(Agent):
         self.critic_lr = critic_lr
         self.polyak = polyak
         self.gamma = gamma
+        self.training_frequency = training_frequency
 
-        self.action_space = action_space
-        self.observation_space = observation_space
-
-        action_dim: int = action_space.shape[0]
-        act_limit: int = action_space.high[0]
-        observation_dim: int = observation_space.shape[0]
+        # set up environment
+        self.env = env
+        action_dim: int = self.env.action_space.shape[0]
+        act_limit_high: int = self.env.action_space.high[0]
+        act_limit_low: int = self.env.action_space.low[0]
+        state_dim: int = self.env.observation_space.shape[0]
 
         self.replay_buffer = ReplayBuffer(self.max_buffer_size, self.replay_sample_size)
 
         # policy
-        self.actor = ActorNetwork(action_dim, observation_dim)
+        self.actor = ActorNetwork(
+            self.hidden_size,
+            ReLU(),
+            action_dim,
+            state_dim,
+            act_limit_high,
+            act_limit_low
+        )
         self.actor_optimiser = Adam(self.actor.parameters(), lr = self.actor_lr)
 
         # q-value function
-        self.critic = CriticNetwork(observation_dim, action_dim)
+        self.critic = CriticNetwork(
+            self.hidden_size,
+            ReLU(),
+            state_dim,
+            action_dim
+        )
         self.critic_optimiser = Adam(self.critic.parameters(), lr = self.critic_lr)
 
         # target
@@ -98,7 +115,7 @@ class DDPGAgent(Agent):
         loss = 0
         for observation in data:
             current_state, action, reward, next_state, terminal = observation
-            pred = self.critic(current_state, action)
+            pred = self.critic.get_q_value(current_state, action)
             loss += (pred - (reward+ self.gamma*(1 - terminal)*self.target_critic.get_q_value(next_state, self.target_actor.get_action(next_state))))
             i += 1
             
@@ -121,14 +138,36 @@ class DDPGAgent(Agent):
 
     def train(self, num_train_episodes=1000, start_steps=10000):
 
-        # do randomly steps
-        for episode in range(start_steps):
-            pass
+        last_s, _ = self.env.reset()
 
-        # lines 4 - 9 in https://spinningup.openai.com/en/latest/algorithms/ddpg.html#documentation-pytorch-version
-        for episode in range(num_train_episodes):
+        for episode in tqdm(range(start_steps)):
+            rand_a = self.env.action_space.sample()
+            new_s, reward, terminated, truncated, *args = self.env.step(rand_a)
+            done = terminated or truncated
+            self.replay_buffer.add((last_s, rand_a, reward, new_s, done))
+            if done:
+                last_s, _ = self.env.reset()
+            else:
+                last_s = new_s
 
-            pass
+        for episode in tqdm(range(num_train_episodes)):
+
+            # action -> numpy array
+            a = self.actor.get_action(last_s).detach().numpy()
+
+            # NUMPY ARRAY
+            assert isinstance(a, np.ndarray), f"Expected a NumPy array, but got {type(a)}"
+
+            new_s, reward, terminated, truncated, *args = self.env.step(a)
+            done = terminated or truncated
+            self.replay_buffer.add((last_s, a, reward, new_s, done))
+            if done:
+                last_s, _ = self.env.reset()
+            else:
+                last_s = new_s
+
+            if episode % self.training_frequency == 0:
+                self.update_weights()
 
     def update_weights(self):
         samples = self.replay_buffer.sample()
@@ -167,8 +206,8 @@ class ActorNetwork(nn.Module):
 
     def __init__(self, hidden_size, activation, action_dim, state_dim, action_lim_high, action_lim_low):
         super().__init__()
-        self.action_lim_high = action_lim_high
-        self.action_lim_low = action_lim_low
+        self.action_max = action_lim_high
+        self.action_min = action_lim_low
         input_size = state_dim
         output_size = action_dim
         layers = []
@@ -177,17 +216,16 @@ class ActorNetwork(nn.Module):
         layers.append(activation)
 
         for i in range(0, len(hidden_size) - 2):
-            layers.append(nn.Linear(hidden_size[i], hidden_size[i+1]))
+            layers.append(nn.Linear(hidden_size[i], hidden_size[i + 1]))
             layers.append(activation)
 
         layers.append(nn.Linear(hidden_size[-1], output_size)) # output layer
-        layers.apppend(nn.t)
 
         self.network = nn.Sequential(*layers) # unpack layers and activation functions into sequential
 
     def forward(self, x):
-
-        x = torch.tanh(self.network(x)) # we need to scale the network's output within the action range
+        network_output = self.network(x)
+        x = torch.tanh(network_output) # we need to scale the network's output within the action range
         action_range = (self.action_max - self.action_min) / 2.0
         action_mid = (self.action_max + self.action_min) / 2.0
         scaled_output = action_mid + action_range * x
@@ -196,7 +234,10 @@ class ActorNetwork(nn.Module):
 
     def get_action(self, state):
         
-        return self.forward(state)
+        a = self.forward(torch.as_tensor(state, dtype=torch.float32))
+        assert isinstance(a, torch.Tensor), f"Expected a PyTorch tensor, but got {type(a)}"
+        assert a.dtype == torch.float32, f"Expected tensor of dtype float32, but got {a.dtype}"
+        return a
 
 
 class CriticNetwork(nn.Module):
@@ -222,10 +263,15 @@ class CriticNetwork(nn.Module):
         return self.network(x)
     
     def get_q_value(self, state, action):
-        x = np.concat(state, action) # ?? should be numerised
+
+        state = torch.as_tensor(state, dtype=torch.float32)
+        action = torch.as_tensor(action, dtype=torch.float32)
+        x = torch.concatenate((state, action))
         return self.forward(x)
 
 if __name__ == "__main__":
 
-    env = gym.make("Humanoid-v4", render_mode=None)
-    agent = DDPGAgent(env.action_space, env.observation_space)
+    env = gym.make("Walker2d-v4", render_mode=None)
+    agent = DDPGAgent(env)
+    agent.train()
+
