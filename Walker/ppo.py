@@ -15,6 +15,7 @@ import torch.nn as nn
 from torch.distributions import Normal
 from enum import Enum
 from ppo_constants import *
+import torch.optim as optim
 
 
 class PPOPolicyNetwork(nn.Module):
@@ -94,15 +95,22 @@ class PPOAgent(Agent):
         epsilon=0.001,
         gamma=0.99,
     ):
+        # Line 1 of pseudocode
         self.policy_network = PPOPolicyNetwork()
+        self.policy_optimiser = optim.Adam(self.policy_network.parameters())
         self.value_network = PPOValueNetwork()
+        self.value_optimiser = optim.Adam(self.actor_network.parameters())
         self.env = env
-        self.epsilon = epsilon  # How large of a step we will take with updates
+        self.epsilon = (
+            epsilon  # How large of a step we will take with updates used in PPO-Clip
+        )
         self.gamma = gamma  # Discount factor
-        self.optimizer = torch.optim
+        self.max_trajectory_timesteps = (
+            1000  # Maximum number of timesteps in a trajectory
+        )
 
     def probability_ratios(self, state, action):
-        """Calculate our probability ratio, which is:
+        """Calculate our probability ratio , which is:
         Ratio = new_policy(state,action) / old_policy(state,action)
         Args:
             state (_type_): S_t
@@ -113,17 +121,6 @@ class PPOAgent(Agent):
         """
 
         return None
-
-    def update_policy(self):
-        """
-        Update our policy network using SGD to minimise the value of clip function
-        Args:
-
-        Returns:
-
-
-        """
-        pass
 
     def entropy_bonus(self):
         """
@@ -148,19 +145,52 @@ class PPOAgent(Agent):
 
     def simulate_episode(self):
         """Simulate a single episode, called by train method on parent class"""
-
         is_finished = False
         is_truncated = False
         state, _ = self.env.reset()
         action, _ = self.policy_network.get_action(state)
-        while not is_finished and not is_truncated:
+        trajectories = []
+        timesteps_in_trajectory = 0
+        # Line 3 of pseudocode, here we are collecting a trajectory
+        while (
+            not is_finished
+            and not is_truncated
+            and timesteps_in_trajectory < self.max_trajectory_timesteps
+        ):
             new_state, reward, is_finished, is_truncated, _ = self.env.step([action])
-
-            ## TODO update here
+            trajectories.append(
+                (state, action, reward, new_state, is_finished, is_truncated)
+            )
             state = new_state
-            action = new_action
+            action, _ = self.policy_network.get_action(state)
+            timesteps_in_trajectory += 1
 
-    def ppo_clip(self, state, action):
+        # Line 5 in Pseudocode
+
+        # Line 6 in Pseudocode
+        normalisation_factor = 1 / (
+            timesteps_in_trajectory
+        )  # 1 / D_k T, which is just timesteps in trajectory for us because we have 1 trajectory
+        advantage_estimates = torch.tensor()  # TODO A^\pi _\theta_k (s_t, a_t)
+        ratio = torch.tensor()  # pi (a_t| s_t) / pi (a_t, s_t)
+        clipped_g = torch.clamp(
+            advantage_estimates, 1 - self.epsilon, 1 + self.epsilon
+        )  # g(\epsilon, advantage estimates)
+        ratio_with_advantage = advantage_estimates * ratio
+        ppo_clipped = torch.min(ratio_with_advantage, clipped_g)
+        loss = normalisation_factor * ppo_clipped
+        self.policy_optimiser.zero_grad()
+
+        loss.backward()
+
+        self.policy_network.step()
+
+    def train(self, num_iterations=10):
+        for _ in range(num_iterations):
+            self.simulate_episode()
+            print("...")
+
+    def ppo_clip_loss(self, state, action):
         pass
 
     def predict(self):
