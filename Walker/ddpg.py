@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import gymnasium as gym
-
+import copy
 #
 # https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/algos/pytorch/ddpg/core.py
 # https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/algos/pytorch/ddpg/ddpg.py
@@ -54,33 +54,38 @@ class DDPGAgent(Agent):
         # q-value function
         self.critic = CriticNetwork(observation_dim, action_dim)
 
+
+        self.target_actor = copy.deepcopy(self.actor)
+        self.target_critic = copy.deepcopy(self.critic)
+
     def predict(self, state):
         with torch.no_grad():
             return self.actor(state).numpy()
 
     def critic_loss(self, data):
-
         # extract observations from data
+        i = 0
+        for observation in data:
+            current_state, action, reward, next_state, terminal = observation
+            pred = self.critic(current_state, action)
+            loss += (pred - (reward+ self.gamma*(1 - terminal)*self.target_critic(next_state, self.target_actor(next_state))))
+            i += 1
+            
+        if (i != 0):
+            loss = loss / i
 
+        return loss
 
-        #  for observations in data:
+    def actor_loss(self, data):
+        i = 0
+        for observation in data: 
+            current_state, action, reward, next_state, terminal = observation
+            loss = -self.critic(current_state, self.actor(current_state))
 
-            # current_state, action, reward, next_state, terminal = observation
+        if (i != 0):
+            loss = loss / i
 
-            # calculate pred = critic(current_state, action)
-
-            # calculate loss += (pred - (r + gamma*(1 - d)*target_critic(next_state, target_actor(next_state))))
-
-        # loss = loss / number of observations
-
-        # return loss
-
-        pass
-
-    def actor_loss(self):
-
-        
-        pass
+        return loss 
 
     def train(self, num_train_episodes=1000, start_steps=10000):
 
