@@ -3,7 +3,7 @@ import torch.nn as nn
 import gymnasium as gym
 import copy
 from typing import Tuple, List
-
+import numpy as np
 from torch.optim import Adam
 
 #
@@ -99,7 +99,7 @@ class DDPGAgent(Agent):
         for observation in data:
             current_state, action, reward, next_state, terminal = observation
             pred = self.critic(current_state, action)
-            loss += (pred - (reward+ self.gamma*(1 - terminal)*self.target_critic(next_state, self.target_actor(next_state))))
+            loss += (pred - (reward+ self.gamma*(1 - terminal)*self.target_critic.get_q_value(next_state, self.target_actor.get_action(next_state))))
             i += 1
             
         if (i != 0):
@@ -112,7 +112,7 @@ class DDPGAgent(Agent):
         loss = 0
         for observation in data: 
             current_state, action, reward, next_state, terminal = observation
-            loss = -self.critic(current_state, self.actor(current_state))
+            loss = -self.critic.get_q_value(current_state, self.actor.get_action(current_state))
 
         if (i != 0):
             loss = loss / i
@@ -165,8 +165,10 @@ class DDPGAgent(Agent):
 
 class ActorNetwork(nn.Module):
 
-    def __init__(self, hidden_size, activation, action_dim, state_dim):
+    def __init__(self, hidden_size, activation, action_dim, state_dim, action_lim_high, action_lim_low):
         super().__init__()
+        self.action_lim_high = action_lim_high
+        self.action_lim_low = action_lim_low
         input_size = state_dim
         output_size = action_dim
         layers = []
@@ -179,11 +181,22 @@ class ActorNetwork(nn.Module):
             layers.append(activation)
 
         layers.append(nn.Linear(hidden_size[-1], output_size)) # output layer
+        layers.apppend(nn.t)
 
         self.network = nn.Sequential(*layers) # unpack layers and activation functions into sequential
 
     def forward(self, x):
-        return self.network(x)
+
+        x = torch.tanh(self.network(x)) # we need to scale the network's output within the action range
+        action_range = (self.action_max - self.action_min) / 2.0
+        action_mid = (self.action_max + self.action_min) / 2.0
+        scaled_output = action_mid + action_range * x
+        return scaled_output
+    
+
+    def get_action(self, state):
+        
+        return self.forward(state)
 
 
 class CriticNetwork(nn.Module):
@@ -204,6 +217,13 @@ class CriticNetwork(nn.Module):
         layers.append(nn.Linear(hidden_size[-1], output_size)) # output layer
 
         self.network = nn.Sequential(*layers) # unpack layers and activation functions into sequential
+
+    def forward(self, x):
+        return self.network(x)
+    
+    def get_q_value(self, state, action):
+        x = np.concat(state, action) # ?? should be numerised
+        return self.forward(x)
 
 if __name__ == "__main__":
 
