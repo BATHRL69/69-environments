@@ -7,9 +7,6 @@ import torch.optim as optim
 from agent import Agent
 from typing import NamedTuple, Any
 
-# Experience as a named tuple is not torch friendly ( cant parallelise using indexing ) and therefore we are looking for a way around it
-# Problem is these arrays must be homogenous in shape, but since a state is not the same size as e.g. is_terminal 
-# we will have to seperate them in the replay buffer, or have them as one numpy array
 
 class Experience(NamedTuple):
     old_state: Any
@@ -18,8 +15,6 @@ class Experience(NamedTuple):
     reward: float
     is_terminal: bool
 
-# Experience is going to be a numpy array as such: Experience = [[old_state],[new_state],[action],[reward],[is_terminal]]
-# or [old_state,new_state,action,reward,is_terminal]
 
 class ReplayBuffer():
     def __init__(self, max_capacity: int, state_shape_size: int, action_space_size: int):
@@ -59,7 +54,7 @@ class SACPolicyLoss(nn.Module):
 
 
 class SACPolicyNetwork(nn.Module):
-    def __init__(self, input_dim: int=256, hidden_units:int=256, action_dim: int=1):
+    def __init__(self, input_dim: int=256, hidden_units: int=256, action_dim: int=1):
         super(SACPolicyNetwork, self).__init__()
 
         self._input_dim = input_dim
@@ -70,7 +65,6 @@ class SACPolicyNetwork(nn.Module):
             nn.Linear(self._input_dim, self._hidden_units),
             nn.ReLU(),
             nn.Linear(self._hidden_units, self._hidden_units),
-            nn.Sigmoid(), # might have to change this
         )
 
         self.mean = nn.Linear(self._hidden_units, self._action_dim)
@@ -105,19 +99,31 @@ class SACValueNetwork(nn.Module):
             nn.Linear(self._hidden_dim, 1),
         )
 
+        self.ann2 = nn.Sequential(
+            nn.Linear(self._input_dim, self._hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self._hidden_dim, 1),
+        )
+
     def forward(self, state:torch.Tensor, action:torch.Tensor)->torch.Tensor:
         # Assuming batch is dim=0, so state is shape [batch,state_space]
         # action is [batch,action_space]
 
         network_input = torch.cat([state,action],dim=1)
-        action_value_estimate = self.ann(network_input) # estimate the value of an action in a state
-        return action_value_estimate
+        action_value_estimate1 = self.ann(network_input) # estimate the value of an action in a state
+        action_value_estimate2 = self.ann2(network_input) # estimate the value of an action in a state
+
+        return action_value_estimate1,action_value_estimate2
 
 
 class SACAgent(Agent):
 
-    def __init__(self, env: gym.Env, update_threshold: int = 100, batch_size: int = 256, alpha: float = 1e-4, gamma: float = 0.99, polyak = 0.99):
+    def __init__(self, env: gym.Env, update_threshold: int = 1000, batch_size: int = 256, alpha: float = 3e-4, gamma: float = 0.99, polyak = 0.99):
         # line 1 of pseudocode
+        self.loss_history = [0]
+        self.loss_history_actor = [0]
+        self.some_values = []
+        self.last_printed = 0.2
         self.env = env
         self.persistent_timesteps = 0
         self.update_threshold = update_threshold
@@ -132,17 +138,18 @@ class SACAgent(Agent):
         self.replay_buffer = ReplayBuffer(1000000, observation_space_shape, action_space_shape)
         self.actor = SACPolicyNetwork(input_dim=observation_space_shape, action_dim=action_space_shape)
         self.critic_1 = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
-        self.critic_2 = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
+        # self.critic_2 = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
         self.critic_target_1 = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
-        self.critic_target_2 = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
+        # self.critic_target_2 = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
 
         self.actor_loss = SACPolicyLoss()
         self.critic_1_loss = nn.MSELoss()
         self.critic_2_loss = nn.MSELoss()
 
         self.actor_optimiser = optim.Adam(self.actor.parameters())
+
         self.critic_1_optimiser = optim.Adam(self.critic_1.parameters())
-        self.critic_2_optimiser = optim.Adam(self.critic_2.parameters())
+        # self.critic_2_optimiser = optim.Adam(self.critic_2.parameters())
 
         # line 2 of pseudocode
         self.polyak_update(0)
@@ -152,8 +159,8 @@ class SACAgent(Agent):
         for (parameter, target_parameter) in zip(self.critic_1.parameters(), self.critic_target_1.parameters()):
             target_parameter.data.copy_((1 - polyak) * parameter.data + polyak * target_parameter.data)
         
-        for (parameter, target_parameter) in zip(self.critic_2.parameters(), self.critic_target_2.parameters()):
-            target_parameter.data.copy_((1 - polyak) * parameter.data + polyak * target_parameter.data)
+        # for (parameter, target_parameter) in zip(self.critic_2.parameters(), self.critic_target_2.parameters()):
+        #     target_parameter.data.copy_((1 - polyak) * parameter.data + polyak * target_parameter.data)
 
     
     def simulate_episode(self, skip_update=False):
@@ -175,6 +182,9 @@ class SACAgent(Agent):
 
             # line 5-6 of pseudocode
             new_state, reward, is_finished, is_truncated, _ = self.env.step(action[0])
+
+            reward =  reward * 5
+
             new_state = torch.tensor(new_state, dtype=torch.float32).unsqueeze(0)
             reward_history.append(reward)
 
@@ -198,49 +208,69 @@ class SACAgent(Agent):
             terminals = torch.tensor(terminals, dtype=torch.float32).unsqueeze(1)
 
             # line 12 of pseudocode
-            actor_prediction_new, log_actor_probability_new = self.actor.forward(new_states, train=False)
-            critic_target_1_prediction = self.critic_target_1.forward(new_states, actor_prediction_new)
-            critic_target_2_prediction = self.critic_target_2.forward(new_states, actor_prediction_new)
-            critic_target_clipped = torch.min(critic_target_1_prediction, critic_target_2_prediction)
-            predicted_target_reward = critic_target_clipped - self.alpha * log_actor_probability_new
-            target = rewards + self.gamma * (1 - terminals) * predicted_target_reward
+            with torch.no_grad():
+                actor_prediction_new, log_actor_probability_new = self.actor.sample(new_states)
+                # critic_target_1_prediction = self.critic_target_1.forward(new_states, actor_prediction_new)
+                # critic_target_2_prediction = self.critic_target_2.forward(new_states, actor_prediction_new)
+
+                critic_target_1_prediction, critic_target_2_prediction = self.critic_target_1.forward(new_states,actor_prediction_new)
+
+                critic_target_clipped = torch.min(critic_target_1_prediction, critic_target_2_prediction)
+                predicted_target_reward = critic_target_clipped - self.alpha * log_actor_probability_new
+                target = rewards + self.gamma * (1 - terminals) * predicted_target_reward
 
             # line 13 of pseudocode
             # TODO: batch norm
-            critic_1_evaluation = self.critic_1.forward(old_states, actions)
-            critic_2_evaluation = self.critic_2.forward(old_states, actions)
+            # critic_1_evaluation = self.critic_1.forward(old_states, actions)
+            # critic_2_evaluation = self.critic_2.forward(old_states, actions)
+            critic_1_evaluation, critic_2_evaluation = self.critic_1.forward(old_states, actions)
 
             critic_1_loss = self.critic_1_loss(target, critic_1_evaluation)
             critic_2_loss = self.critic_2_loss(target, critic_2_evaluation)
 
             self.critic_1_optimiser.zero_grad()
-            self.critic_2_optimiser.zero_grad()
+            # self.critic_2_optimiser.zero_grad()
 
             total_loss = critic_1_loss + critic_2_loss
             total_loss.backward()
+
+            detached_loss = total_loss.detach().numpy()
+
+            if detached_loss != self.loss_history[-1]:
+                self.loss_history.append(detached_loss)
             
             self.critic_1_optimiser.step()
-            self.critic_2_optimiser.step()
+            # self.critic_2_optimiser.step()
 
             # line 14 of pseudocode
             # TODO: batch norm
-            actor_prediction_old, log_actor_probability_old = self.actor.forward(old_states, train=False)
-            critic_1_prediction = self.critic_1.forward(old_states, actor_prediction_old)
-            critic_2_prediction = self.critic_2.forward(old_states, actor_prediction_old)
+            actor_prediction_old, log_actor_probability_old = self.actor.sample(old_states)
+            critic_1_prediction, critic_2_prediction = self.critic_1.forward(old_states, actor_prediction_old)
+            # critic_2_prediction = self.critic_2.forward(old_states, actor_prediction_old)
             critic_clipped = torch.min(critic_1_prediction, critic_2_prediction)
 
             actor_loss = self.actor_loss(critic_clipped, log_actor_probability_old, self.alpha)
 
+            detached_actor_loss = actor_loss.detach().numpy()
+
+            if detached_actor_loss != self.loss_history_actor[-1]:
+                self.loss_history_actor.append(detached_actor_loss)
+
             self.actor_optimiser.zero_grad()
             actor_loss.backward()
             self.actor_optimiser.step()
+            # self.loss_history.append(actor_loss.detach().numpy()[0])
+
 
             # line 15 of pseudocode
             self.polyak_update(self.polyak)
             
             state = new_state
-
-        return timestep, sum(reward_history)
+        
+        if self.loss_history[-1] != self.last_printed:
+            self.last_printed = self.loss_history[-1]
+            print(self.loss_history[-1])
+        return timestep, sum(reward_history), self.loss_history, self.loss_history_actor
 
 
     def train(self, num_timesteps=100000, print_interval=50, start_timesteps=1000):
@@ -250,7 +280,7 @@ class SACAgent(Agent):
         episodes = 0
 
         while timesteps < start_timesteps:
-            elapsed_timesteps, _ = self.simulate_episode(skip_update=True)
+            elapsed_timesteps, _ , _, _ = self.simulate_episode(skip_update=True)
             timesteps += elapsed_timesteps
             episodes += 1
 
@@ -280,4 +310,4 @@ class SACAgent(Agent):
 env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
 
 model = SACAgent(env)
-model.train(num_timesteps=100000)
+model.train(num_timesteps=200000)
