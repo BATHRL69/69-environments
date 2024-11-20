@@ -1,7 +1,7 @@
 # Setup
 # git clone https://github.com/google-deepmind/mujoco_menagerie.git#
 # Updated xml_file path to your directoy
-# pip install from custom_requirements.txt
+# pip install -r from custom_requirements.txt
 # run
 
 
@@ -10,7 +10,7 @@ import cv2
 
 env = gymnasium.make(
     "Ant-v5",
-    xml_file="C:/Users/Solly/_/python/69/Walker/mujoco_menagerie/unitree_go1/scene.xml",
+    xml_file="C:/Users/fabie/OneDrive - University of Bath/Desktop/mujoco_menagerie/unitree_go1/scene.xml",
     forward_reward_weight=1,
     ctrl_cost_weight=0.05,
     contact_cost_weight=5e-4,

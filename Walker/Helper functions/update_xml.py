@@ -117,7 +117,7 @@ def update_env_xml(add_obstacles, add_slippy_surface, reduce_motor_strength):
     if reduce_motor_strength:
         pass
     custom_xml_path = (
-        "C:/Users/Solly/_/python/69/Walker/temp_ant.xml"  # UPDATE ME TO YOUR path
+        "C:/Users/fabie/OneDrive - University of Bath/Desktop/RL69/69-environments/Walker/Testing functions/temp_ant.xml"  # UPDATE ME TO YOUR path
     )
     with open(custom_xml_path, "w") as f:
         f.write(modified_xml)
