@@ -191,7 +191,7 @@ class PPOAgent(Agent):
     def simulate_episode(self):
         """Simulate a single episode, called by train method on parent class"""
         self.transfer_policy_net_to_old()  # Transfer the current probability network to OLD, so that we are feezing it, before we start making updates
-
+        all_rewards = []
         is_finished = False
         is_truncated = False
         state, _ = self.env.reset()
@@ -213,6 +213,7 @@ class PPOAgent(Agent):
             state = torch.tensor(new_state, dtype=torch.float32)
             action, _ = self.policy_network.get_action(state)
             timesteps_in_trajectory += 1
+
         ## Get lists of values from our trajectories,
         states = torch.tensor(
             [this_timestep[0] for this_timestep in trajectories], dtype=torch.float32
@@ -220,6 +221,7 @@ class PPOAgent(Agent):
         actions = torch.tensor(
             [this_timestep[1] for this_timestep in trajectories], dtype=torch.float32
         )
+        all_rewards.extend([this_timestep[2] for this_timestep in trajectories])
         rewards = torch.tensor(
             [this_timestep[2] for this_timestep in trajectories], dtype=torch.float32
         )
@@ -257,13 +259,15 @@ class PPOAgent(Agent):
 
         # Line 7 in pseudocode
         value_estimates = torch.tensor(
-            [self.value_network.forward(this_state)] for this_state in states
+            [self.value_network.forward(this_state) for this_state in states],
+            requires_grad=True,
         )
-        value_loss = (normalisation_factor) * torch.square(
-            value_estimates - rewards_to_go
-        )
+        value_loss = (normalisation_factor) * torch.mean(
+            torch.square(value_estimates - rewards_to_go)
+        )  # TODO pseudocode has this as SUM, but it's mean squared error. Need to workout which one works better
         value_loss.backward()
         self.value_optimiser.step()
+        print("Average reward" + str(sum(all_rewards) / len(all_rewards)))
 
     def train(self, num_iterations=10):
         for _ in range(num_iterations):
