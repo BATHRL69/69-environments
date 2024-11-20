@@ -57,6 +57,14 @@ class PPOPolicyNetwork(nn.Module):
         probability = distribution.log_prob(action)
         return action, probability
 
+    def get_probability_given_action(self, state, action):
+        action_values = self.network(state)
+        distribution = Normal(action_values, 1.0)
+        return torch.exp(
+            distribution.log_prob(action)
+        )  # TODO will this action be in the right format for this to work?
+        # TODO We are doing exp to turn our log_prob into probability 0-1. But do we actually want log_prob?
+
     def evaluate(self, state, action):
         pass
 
@@ -97,6 +105,7 @@ class PPOAgent(Agent):
     ):
         # Line 1 of pseudocode
         self.policy_network = PPOPolicyNetwork()
+        self.old_policy_network = PPOPolicyNetwork()
         self.policy_optimiser = optim.Adam(self.policy_network.parameters())
         self.value_network = PPOValueNetwork()
         self.value_optimiser = optim.Adam(self.actor_network.parameters())
@@ -108,6 +117,9 @@ class PPOAgent(Agent):
         self.max_trajectory_timesteps = (
             1000  # Maximum number of timesteps in a trajectory
         )
+
+    def transfer_policy_net_to_old(self):
+        self.old_policy_network.load_state_dict(self.policy_network.state_dict())
 
     def probability_ratios(self, state, action):
         """Calculate our probability ratio , which is:
@@ -140,11 +152,15 @@ class PPOAgent(Agent):
 
         """
 
-    def update_value(self):
+    def rewards_to_go(self):
+        """Calculate rewards to go"""
+
         pass
 
     def simulate_episode(self):
         """Simulate a single episode, called by train method on parent class"""
+        self.transfer_policy_net_to_old()  # Transfer the current probability network to OLD, so that we are feezing it, before we start making updates
+
         is_finished = False
         is_truncated = False
         state, _ = self.env.reset()
@@ -164,14 +180,17 @@ class PPOAgent(Agent):
             state = new_state
             action, _ = self.policy_network.get_action(state)
             timesteps_in_trajectory += 1
-
+        # Line 4 in pseudocode
+        # Compute rewards to go
+        rewards_to_go = torch.tensor()  # TODO
         # Line 5 in Pseudocode
+        # Compute advantage estimates
+        advantage_estimates = torch.tensor()  # TODO A^\pi _\theta_k (s_t, a_t)
 
         # Line 6 in Pseudocode
         normalisation_factor = 1 / (
             timesteps_in_trajectory
         )  # 1 / D_k T, which is just timesteps in trajectory for us because we have 1 trajectory
-        advantage_estimates = torch.tensor()  # TODO A^\pi _\theta_k (s_t, a_t)
         ratio = torch.tensor()  # pi (a_t| s_t) / pi (a_t, s_t)
         clipped_g = torch.clamp(
             advantage_estimates, 1 - self.epsilon, 1 + self.epsilon
@@ -189,9 +208,6 @@ class PPOAgent(Agent):
         for _ in range(num_iterations):
             self.simulate_episode()
             print("...")
-
-    def ppo_clip_loss(self, state, action):
-        pass
 
     def predict(self):
         pass
@@ -220,3 +236,8 @@ class PPOAgent(Agent):
                 self.policy_network = pickle.load(file)
             with open(path + PickleLocations.VALUE_NETWORK.value, "rb") as file:
                 self.value_network = pickle.load(file)
+
+
+env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
+model = PPOAgent(env)
+model.train(num_iterations=10)
