@@ -13,7 +13,7 @@ class Agent:
             episodes += 1
 
             if (episodes % print_interval == 0):
-                print(f"Training {timesteps / num_timesteps}% complete...")
+                print(f"Training {100 * timesteps / num_timesteps:.2f}% complete...")
 
     def predict(self, state):
         """Predict the best action for the current state."""

@@ -59,7 +59,7 @@ class SACPolicyLoss(nn.Module):
 
 
 class SACPolicyNetwork(nn.Module):
-    def __init__(self, input_dim: int = 256,hidden_units:int=256, action_dim: int = 1):
+    def __init__(self, input_dim: int=256, hidden_units:int=256, action_dim: int=1):
         super(SACPolicyNetwork, self).__init__()
 
         self._input_dim = input_dim
@@ -76,7 +76,8 @@ class SACPolicyNetwork(nn.Module):
         self.mean = nn.Linear(self._hidden_units, self._action_dim)
         self.log_std_dev = nn.Linear(self._hidden_units, self._action_dim)
 
-    def forward(self, state:torch.Tensor)->torch.Tensor:
+    def forward(self, state:torch.Tensor, train:bool=True)->torch.Tensor:
+        #state.unsqueeze(0)
         out = self.ann(state) # samples a prob dis
         mean = self.mean(out)
         ## why log std and why not std
@@ -85,18 +86,20 @@ class SACPolicyNetwork(nn.Module):
         return mean, log_std
     
     def sample(self, state:torch.Tensor)->torch.Tensor:
-        mean,log_std = self.forward(state)
+        mean, log_std = self.forward(state)
         std = torch.exp(log_std)
         noise = torch.randn_like(std)
         sampled_action = mean + std * noise
-        log_prob = -0.5 * ((noise**2) + 2 * log_std + torch.log(2 * torch.pi)).sum(dim=1, keepdim=True) # do we need dim=1 and keepdim
-        return sampled_action,log_prob
+        log_2_pi = torch.log(torch.Tensor([2 * torch.pi]))
+        log_prob = -0.5 * ((noise**2) + 2 * log_std + log_2_pi).sum(dim=1, keepdim=True) # do we need dim=1 and keepdim
+        return sampled_action, log_prob
+
 
 class SACValueNetwork(nn.Module):
-    def __init__(self,input_dim:int=256,hidden_dim=256):
-        self._input_dim=input_dim
-        self._hidden_dim=hidden_dim
-        super(SACPolicyNetwork,self).__init__()
+    def __init__(self, input_dim:int=256, hidden_dim=256):
+        self._input_dim = input_dim
+        self._hidden_dim = hidden_dim
+        super(SACValueNetwork, self).__init__()
         self.ann = nn.Sequential(
             nn.Linear(self._input_dim, self._hidden_dim),
             nn.ReLU(),
@@ -123,13 +126,16 @@ class SACAgent(Agent):
         self.alpha = alpha
         self.gamma = gamma
         self.polyak = polyak
-        self.replay_buffer = ReplayBuffer(1e6, env.observation_space._shape[0], env.action_space._shape[0])
 
-        self.actor = SACPolicyNetwork()
-        self.critic_1 = SACValueNetwork()
-        self.critic_2 = SACValueNetwork()
-        self.critic_target_1 = SACValueNetwork()
-        self.critic_target_2 = SACValueNetwork()
+        observation_space_shape = env.observation_space._shape[0]
+        action_space_shape = env.action_space._shape[0]
+
+        self.replay_buffer = ReplayBuffer(1000000, observation_space_shape, action_space_shape)
+        self.actor = SACPolicyNetwork(input_dim=observation_space_shape, action_dim=action_space_shape)
+        self.critic_1 = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
+        self.critic_2 = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
+        self.critic_target_1 = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
+        self.critic_target_2 = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
 
         self.actor_loss = SACPolicyLoss()
         self.critic_1_loss = nn.MSELoss()
@@ -156,6 +162,7 @@ class SACAgent(Agent):
         is_truncated = False
 
         state, _ = self.env.reset()
+        state = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
         timestep = 0
 
         # line 3 of pseudocode
@@ -163,13 +170,14 @@ class SACAgent(Agent):
             timestep += 1
 
             # line 4 of pseudocode
-            action = self.actor.forward(state, train=False)
+            action = self.actor.sample(state)[0].detach().numpy()
 
             # line 5-6 of pseudocode
-            new_state, reward, is_finished, is_truncated, _ = self.env.step(action)
+            new_state, reward, is_finished, is_truncated, _ = self.env.step(action[0])
+            new_state = torch.tensor(new_state, dtype=torch.float32).unsqueeze(0)
 
             # line 7 of pseudocode
-            self.replay_buffer.add(Experience(state, new_state, action, reward, is_finished))
+            self.replay_buffer.add(Experience(state[0], new_state[0], action, reward, is_finished))
 
             # line 8 of pseudocode
             if is_finished or is_truncated:
@@ -238,7 +246,7 @@ class SACAgent(Agent):
             episodes += 1
 
             if (episodes % print_interval == 0):
-                print(f"Start timesteps {timesteps / num_timesteps}% complete...")
+                print(f"Start timesteps {100 * timesteps / start_timesteps:.2f}% complete...")
         
         super().train(num_timesteps - timesteps, print_interval)
 
