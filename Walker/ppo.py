@@ -16,6 +16,7 @@ from torch.distributions import Normal
 from enum import Enum
 from ppo_constants import *
 import torch.optim as optim
+import matplotlib.pyplot as plt
 
 
 class PPOPolicyNetwork(nn.Module):
@@ -121,7 +122,7 @@ class PPOAgent(Agent):
         )
         self.gamma = gamma  # Discount factor, used in advantage estimation.
         self.max_trajectory_timesteps = (
-            1000  # Maximum number of timesteps in a trajectory
+            100000  # Maximum number of timesteps in a trajectory
         )
 
     def transfer_policy_net_to_old(self):
@@ -267,12 +268,30 @@ class PPOAgent(Agent):
         )  # TODO pseudocode has this as SUM, but it's mean squared error. Need to workout which one works better
         value_loss.backward()
         self.value_optimiser.step()
-        print("Average reward" + str(sum(all_rewards) / len(all_rewards)))
+        return timesteps_in_trajectory, sum(all_rewards)
 
-    def train(self, num_iterations=10):
-        for _ in range(num_iterations):
-            self.simulate_episode()
-            print("...")
+    def train(self, num_iterations=1000, log_iterations=100):
+        total_timesteps = 0
+        total_reward = []
+        average_rewards = []
+        while total_timesteps < num_iterations:
+
+            timesteps, reward = (
+                self.simulate_episode()
+            )  # Taking total reward here because we want to maximise total reward, which is keeping pendulum up
+            total_reward.append(reward)
+            if total_timesteps % log_iterations == 0:
+                average_reward = sum(total_reward) / len(total_reward)
+
+                print("Average reward " + str(average_reward))
+                average_rewards.append(average_reward)
+                total_reward = []
+            total_timesteps += timesteps
+        self.plot(average_rewards)
+
+    def plot(self, average_rewards):
+        plt.plot(average_rewards)
+        plt.show()
 
     def predict(self):
         pass
@@ -305,5 +324,5 @@ class PPOAgent(Agent):
 
 env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
 model = PPOAgent(env, observation_space=4, action_space=1, action_scaling=3)
-model.train(num_iterations=10)
+model.train(num_iterations=100000)
 # TODO update policy to *3
