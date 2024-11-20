@@ -7,6 +7,33 @@ import gymnasium as gym
 # https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/algos/pytorch/ddpg/ddpg.py
 
 from agent import Agent
+import random
+random.seed(0)
+
+class ReplayBuffer:
+
+    def __init__(self, max_buffer_size, sample_size):
+        self.max_buffer_size = max_buffer_size
+        self.sample_size = sample_size
+        self.buffer = []
+
+    def add(self, observation):
+        if len(self.buffer) >= self.max_buffer_size:
+            # randomly select an index
+            index = random.randint(0, len(self.buffer) - 1)
+            self.buffer[index] = observation
+        else:
+            self.buffer.append(observation)
+
+    def sample(self):
+        sample = []
+        indices_selected = set()
+        for i in range(self.sample_size):
+            index = random.randint(0, len(self.buffer) - 1)
+            while index in indices_selected:
+                index = random.randint(0, len(self.buffer) - 1)
+            sample.append(self.buffer[index])
+        return sample
 
 class DDPGAgent(Agent):
 
@@ -38,7 +65,7 @@ class DDPGAgent(Agent):
 
         #  for observations in data:
 
-            # current_state, action, reward, next_state, d = observation
+            # current_state, action, reward, next_state, terminal = observation
 
             # calculate pred = critic(current_state, action)
 
@@ -55,9 +82,12 @@ class DDPGAgent(Agent):
         
         pass
 
-    def train(self, num_episodes=1000):
+    def train(self, num_train_episodes=1000, start_steps=10000):
+
+        # do randomly steps
+
         # lines 4 - 9 in https://spinningup.openai.com/en/latest/algorithms/ddpg.html#documentation-pytorch-version
-        for episode in range(num_episodes):
+        for episode in range(num_train_episodes):
 
             pass
 
