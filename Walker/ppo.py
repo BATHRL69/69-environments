@@ -270,7 +270,7 @@ class PPOAgent(Agent):
         self.value_optimiser.step()
         return timesteps_in_trajectory, sum(all_rewards)
 
-    def train(self, num_iterations=1000, log_iterations=100):
+    def train(self, num_iterations=1000, log_iterations=10):
         total_timesteps = 0
         total_reward = []
         average_rewards = []
@@ -280,10 +280,14 @@ class PPOAgent(Agent):
                 self.simulate_episode()
             )  # Taking total reward here because we want to maximise total reward, which is keeping pendulum up
             total_reward.append(reward)
-            if total_timesteps % log_iterations == 0:
+            if (
+                total_timesteps % log_iterations == 0
+            ):  # TODO we don't have the same number of timesteps at each step so this isn't logging every time
                 average_reward = sum(total_reward) / len(total_reward)
 
-                print("Average reward " + str(average_reward))
+                print(
+                    f"Average reward:{average_reward:.2f} Timestep: {total_timesteps}"
+                )
                 average_rewards.append(average_reward)
                 total_reward = []
             total_timesteps += timesteps
@@ -324,5 +328,4 @@ class PPOAgent(Agent):
 
 env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
 model = PPOAgent(env, observation_space=4, action_space=1, action_scaling=3)
-model.train(num_iterations=100000)
-# TODO update policy to *3
+model.train(num_iterations=10000)
