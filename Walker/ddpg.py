@@ -2,6 +2,10 @@ import torch
 import torch.nn as nn
 import gymnasium as gym
 import copy
+from typing import Tuple, List
+
+from torch.optim import Adam
+
 #
 # https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/algos/pytorch/ddpg/core.py
 # https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/algos/pytorch/ddpg/ddpg.py
@@ -15,7 +19,7 @@ class ReplayBuffer:
     def __init__(self, max_buffer_size, sample_size):
         self.max_buffer_size = max_buffer_size
         self.sample_size = sample_size
-        self.buffer = []
+        self.buffer: List[Tuple] = []
 
     def add(self, observation):
         if len(self.buffer) >= self.max_buffer_size:
@@ -37,9 +41,24 @@ class ReplayBuffer:
 
 class DDPGAgent(Agent):
 
-    def __init__(self, action_space, observation_space):
+    def __init__(
+            self,
+            action_space,
+            observation_space,
+            max_buffer_size: int,
+            replay_sample_size: int,
+            actor_lr: float,
+            critic_lr: float,
+            polyak: float = 0.995,
+            gamma: float = 0.99
+    ):
         # set hyperparams
-        # polyak, learning rate, num episodes etc
+        self.max_buffer_size = max_buffer_size
+        self.replay_sample_size = replay_sample_size
+        self.actor_lr = actor_lr
+        self.critic_lr = critic_lr
+        self.polyak = polyak
+        self.gamma = gamma
 
         self.action_space = action_space
         self.observation_space = observation_space
@@ -48,15 +67,26 @@ class DDPGAgent(Agent):
         act_limit: int = action_space.high[0]
         observation_dim: int = observation_space.shape[0]
 
+        self.replay_buffer = ReplayBuffer(self.max_buffer_size, self.replay_sample_size)
+
         # policy
         self.actor = ActorNetwork(action_dim, observation_dim)
+        self.actor_optimiser = Adam(self.actor.parameters(), lr = self.actor_lr)
 
         # q-value function
         self.critic = CriticNetwork(observation_dim, action_dim)
+        self.critic_optimiser = Adam(self.critic.parameters(), lr = self.critic_lr)
 
-
+        # target
         self.target_actor = copy.deepcopy(self.actor)
         self.target_critic = copy.deepcopy(self.critic)
+
+        # freeze target actor and target critic
+        for parameter in self.target_actor.parameters():
+            parameter.requires_grad = False
+
+        for parameter in self.target_critic.parameters():
+            parameter.requires_grad = False
 
     def predict(self, state):
         with torch.no_grad():
@@ -65,6 +95,7 @@ class DDPGAgent(Agent):
     def critic_loss(self, data):
         # extract observations from data
         i = 0
+        loss = 0
         for observation in data:
             current_state, action, reward, next_state, terminal = observation
             pred = self.critic(current_state, action)
@@ -78,6 +109,7 @@ class DDPGAgent(Agent):
 
     def actor_loss(self, data):
         i = 0
+        loss = 0
         for observation in data: 
             current_state, action, reward, next_state, terminal = observation
             loss = -self.critic(current_state, self.actor(current_state))
@@ -90,11 +122,46 @@ class DDPGAgent(Agent):
     def train(self, num_train_episodes=1000, start_steps=10000):
 
         # do randomly steps
+        for episode in range(start_steps):
+            pass
 
         # lines 4 - 9 in https://spinningup.openai.com/en/latest/algorithms/ddpg.html#documentation-pytorch-version
         for episode in range(num_train_episodes):
 
             pass
+
+    def update_weights(self):
+        samples = self.replay_buffer.sample()
+        self.actor_optimiser.zero_grad()
+        self.critic_optimiser.zero_grad()
+
+        # compute critic loss
+        critic_loss = self.critic_loss(samples)
+        critic_loss.backward()
+        self.critic_optimiser.step()
+
+        # freeze the crtic
+        for parameter in self.critic.parameters():
+            parameter.requires_grad = False
+
+        # actor loss computation
+        actor_loss = self.actor_loss(samples)
+        actor_loss.backward()
+        self.actor_optimiser.step()
+
+        # unfreeze the critic
+        for parameter in self.critic.parameters():
+            parameter.requires_grad = True
+
+        # polyak averaging -> actor params
+        for actor_p, target_actor_p in zip(self.actor.parameters(), self.target_actor.parameters()):
+            target_actor_p.data.mul_(self.polyak)
+            target_actor_p.data.add_((1 - self.polyak) * actor_p.data)
+
+        # polyak averaging -> critic params
+        for critic_p, target_critic_p in zip(self.critic.parameters(), self.target_critic.parameters()):
+            target_critic_p.data.mul_(self.polyak)
+            target_critic_p.data.add_((1 - self.polyak) * critic_p.data)
 
 class ActorNetwork(nn.Module):
 
@@ -114,7 +181,6 @@ class ActorNetwork(nn.Module):
         layers.append(nn.Linear(hidden_size[-1], output_size)) # output layer
 
         self.network = nn.Sequential(*layers) # unpack layers and activation functions into sequential
-    
 
     def forward(self, x):
         return self.network(x)
