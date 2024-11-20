@@ -5,6 +5,7 @@ from torch.nn import ReLU
 import gymnasium as gym
 import copy
 from typing import Tuple, List
+import matplotlib.pyplot as plt
 import numpy as np
 import random
 from tqdm import tqdm
@@ -105,6 +106,9 @@ class DDPGAgent(Agent):
         for parameter in self.target_critic.parameters():
             parameter.requires_grad = False
 
+        self.critic_losses = []
+        self.actor_losses = []
+
     def predict(self, state):
         with torch.no_grad():
             return self.actor(state).numpy()
@@ -136,7 +140,7 @@ class DDPGAgent(Agent):
 
         return loss 
 
-    def train(self, num_train_episodes=1000, start_steps=10000):
+    def train(self, num_train_episodes=100000, start_steps=100):
 
         last_s, _ = self.env.reset()
 
@@ -150,6 +154,9 @@ class DDPGAgent(Agent):
             else:
                 last_s = new_s
 
+        episodic_rewards = []
+
+        total_reward = 0
         for episode in tqdm(range(num_train_episodes)):
 
             # action -> numpy array
@@ -159,15 +166,34 @@ class DDPGAgent(Agent):
             assert isinstance(a, np.ndarray), f"Expected a NumPy array, but got {type(a)}"
 
             new_s, reward, terminated, truncated, *args = self.env.step(a)
+            total_reward += reward
             done = terminated or truncated
             self.replay_buffer.add((last_s, a, reward, new_s, done))
             if done:
                 last_s, _ = self.env.reset()
+                episodic_rewards.append(total_reward)
+                total_reward = 0
             else:
                 last_s = new_s
 
             if episode % self.training_frequency == 0:
                 self.update_weights()
+
+        # Plot the episodic curve
+        plt.plot(range(len(self.critic_losses)), self.critic_losses, label="Critic loss")
+        plt.xlabel("Episodes")
+        plt.ylabel("Critic Losses")
+        plt.title("DDPG Training Performance")
+        plt.legend()
+        plt.show()
+
+        # Plot the episodic curve
+        plt.plot(range(len(self.actor_losses)), self.actor_losses, label="Actor loss")
+        plt.xlabel("Episodes")
+        plt.ylabel("Actor Losses")
+        plt.title("DDPG Training Performance")
+        plt.legend()
+        plt.show()
 
     def update_weights(self):
         samples = self.replay_buffer.sample()
@@ -176,6 +202,7 @@ class DDPGAgent(Agent):
 
         # compute critic loss
         critic_loss = self.critic_loss(samples)
+        self.critic_losses.append(critic_loss.item())
         critic_loss.backward()
         self.critic_optimiser.step()
 
@@ -185,6 +212,7 @@ class DDPGAgent(Agent):
 
         # actor loss computation
         actor_loss = self.actor_loss(samples)
+        self.actor_losses.append(actor_loss.item())
         actor_loss.backward()
         self.actor_optimiser.step()
 
