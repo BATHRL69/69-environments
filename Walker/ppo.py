@@ -1,19 +1,15 @@
 ## TODO
-# Skeleton code - Solly
-#
 #
 #
 
 import gymnasium as gym
 import numpy as np
-import random
 from agent import Agent
 import pickle
 import os
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
-from enum import Enum
 from ppo_constants import *
 import torch.optim as optim
 import matplotlib.pyplot as plt
@@ -102,20 +98,30 @@ class PPOAgent(Agent):
     def __init__(
         self,
         env,
-        epsilon=0.001,
+        epsilon=0.2,
         gamma=0.99,
         observation_space=105,
         action_space=8,
         action_scaling=1,
+        learning_rate=3e-4,
+        weight_decay=0,
     ):
         # Line 1 of pseudocode
         self.policy_network = PPOPolicyNetwork(
             observation_space, action_space, action_scaling
         )
         self.old_policy_network = self.policy_network
-        self.policy_optimiser = optim.Adam(self.policy_network.parameters())
+        self.policy_optimiser = optim.Adam(
+            self.policy_network.parameters(),
+            lr=learning_rate,
+            weight_decay=weight_decay,
+        )
         self.value_network = PPOValueNetwork(observation_space)
-        self.value_optimiser = optim.Adam(self.value_network.parameters())
+        self.value_optimiser = optim.Adam(
+            self.value_network.parameters(),
+            lr=learning_rate,
+            weight_decay=weight_decay,
+        )
         self.env = env
         self.epsilon = (
             epsilon  # How large of a step we will take with updates used in PPO-Clip
@@ -284,9 +290,10 @@ class PPOAgent(Agent):
                 total_timesteps % log_iterations == 0
             ):  # TODO we don't have the same number of timesteps at each step so this isn't logging every time
                 average_reward = sum(total_reward) / len(total_reward)
-
                 print(
-                    f"Average reward:{average_reward:.2f} Timestep: {total_timesteps}"
+                    f"\r Processing Progress: {(total_timesteps/ num_iterations * 100):.2f}% Average reward:{average_reward:.2f} ",
+                    end="",
+                    flush=True,
                 )
                 average_rewards.append(average_reward)
                 total_reward = []
@@ -328,4 +335,4 @@ class PPOAgent(Agent):
 
 env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
 model = PPOAgent(env, observation_space=4, action_space=1, action_scaling=3)
-model.train(num_iterations=10000)
+model.train(num_iterations=1000000)
