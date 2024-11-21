@@ -5,6 +5,7 @@
 # Check that the old model is definetly frozen.
 # Check if there is anything we need to detach in main loop that we're not detaching
 # Implement rendering
+# Hyper param tuning
 
 import gymnasium as gym
 import numpy as np
