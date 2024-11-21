@@ -1,5 +1,5 @@
 ## TODO
-# Implement GAE, instead of MC.
+# Implement GAE, instead of MC for G(A,S) in state_action_values_mc.
 # Learn STD, instead of a set value.
 # Update loop so that we calculate a batch of trajectories, and learn from them, instead of just one.
 # Check that the old model is definetly frozen.
