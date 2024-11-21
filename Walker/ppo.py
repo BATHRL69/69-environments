@@ -1,6 +1,8 @@
 ## TODO
-#
-#
+# Implement GAE
+# Learn STD, instead of a set value
+# Update loop so that we calculate a batch of trajectories, and learn from them, instead of just one.
+# Check that the old model is definetly frozen
 
 import gymnasium as gym
 import numpy as np
@@ -9,7 +11,7 @@ import pickle
 import os
 import torch
 import torch.nn as nn
-from torch.distributions import Normal
+from torch.distributions import Uniform, Normal
 from ppo_constants import *
 import torch.optim as optim
 import matplotlib.pyplot as plt
@@ -28,7 +30,7 @@ class PPOPolicyNetwork(nn.Module):
         self,
         observation_space=105,  # Defaults set from ant walker
         action_space=8,  # Defaults set from ant walker
-        action_scale=1,  # Default is -1 to 1, but we could have -2, 2 etc
+        std=0.1,  # Standard deviation for normal distribution
     ):
         # TODO need to work out what network is going to work best here
         super(PPOPolicyNetwork, self).__init__()
@@ -36,9 +38,9 @@ class PPOPolicyNetwork(nn.Module):
             nn.Linear(observation_space, 32),
             nn.Tanh(),
             nn.Linear(32, action_space),
-            nn.Tanh(),  # Ant action space is -1 to 1
+            # nn.Tanh(),  # Ant action space is -1 to 1
         )
-        self.action_scale = action_scale
+        self.std = std
 
     def get_action(self, state):
         """Given a state, gets an action, sampled from normal distribution
@@ -50,14 +52,14 @@ class PPOPolicyNetwork(nn.Module):
             torch.tensor: action, probability
         """
         action_values = self.network(state)
-        distribution = Normal(action_values, 1.0)  # Std of 1.0
+        distribution = Normal(action_values, self.std)  # Std of 1.0
         action = distribution.sample()
         probability = distribution.log_prob(action)
-        return action * self.action_scale, probability
+        return action, probability
 
     def get_probability_given_action(self, state, action):
         action_values = self.network(state)
-        distribution = Normal(action_values, 1.0)
+        distribution = Normal(action_values, self.std)
         return distribution.log_prob(action)
         # TODO will this action be in the right format for this to work?
         # TODO We are doing exp to turn our log_prob into probability 0-1. Will do torch.exp in probability ratio method to return this to between 0 and 1
@@ -102,14 +104,12 @@ class PPOAgent(Agent):
         gamma=0.99,
         observation_space=105,
         action_space=8,
-        action_scaling=1,
+        std=0.1,
         learning_rate=3e-4,
         weight_decay=0,
     ):
         # Line 1 of pseudocode
-        self.policy_network = PPOPolicyNetwork(
-            observation_space, action_space, action_scaling
-        )
+        self.policy_network = PPOPolicyNetwork(observation_space, action_space, std)
         self.old_policy_network = self.policy_network
         self.policy_optimiser = optim.Adam(
             self.policy_network.parameters(),
@@ -215,12 +215,15 @@ class PPOAgent(Agent):
         ):
             new_state, reward, is_finished, is_truncated, _ = self.env.step(action)
             trajectories.append(
-                (state, action, reward, new_state, is_finished, is_truncated)
+                (state, action.detach(), reward, new_state, is_finished, is_truncated)
             )
             state = torch.tensor(new_state, dtype=torch.float32)
             action, _ = self.policy_network.get_action(state)
             timesteps_in_trajectory += 1
 
+        trajectories.append(
+            (state, action, reward, state, is_finished, is_truncated)
+        )  # Append the final trajectory
         ## Get lists of values from our trajectories,
         states = torch.tensor(
             [this_timestep[0] for this_timestep in trajectories], dtype=torch.float32
@@ -334,5 +337,5 @@ class PPOAgent(Agent):
 
 
 env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
-model = PPOAgent(env, observation_space=4, action_space=1, action_scaling=3)
-model.train(num_iterations=1000000)
+model = PPOAgent(env, observation_space=4, action_space=1, std=0.3)
+model.train(num_iterations=400_000)
