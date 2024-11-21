@@ -8,6 +8,10 @@
 # Hyper param tuning
 # Line 232: UserWarning: Creating a tensor from a list of numpy.ndarrays is extremely slow. Please consider converting the list to a single numpy.ndarray with numpy.array() before converting to a tensor.
 # Speed up running
+# Add doc strings
+# Update size of neural network to get best results
+# Try different distributions other than normal
+# Try on ant
 
 import gymnasium as gym
 import numpy as np
