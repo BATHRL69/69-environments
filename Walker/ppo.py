@@ -1,8 +1,10 @@
 ## TODO
-# Implement GAE
-# Learn STD, instead of a set value
+# Implement GAE, instead of MC.
+# Learn STD, instead of a set value.
 # Update loop so that we calculate a batch of trajectories, and learn from them, instead of just one.
-# Check that the old model is definetly frozen
+# Check that the old model is definetly frozen.
+# Check if there is anything we need to detach in main loop that we're not detaching
+# Implement rendering
 
 import gymnasium as gym
 import numpy as np
@@ -110,7 +112,8 @@ class PPOAgent(Agent):
     ):
         # Line 1 of pseudocode
         self.policy_network = PPOPolicyNetwork(observation_space, action_space, std)
-        self.old_policy_network = self.policy_network
+        self.old_policy_network = PPOPolicyNetwork(observation_space, action_space, std)
+        self.transfer_policy_net_to_old()
         self.policy_optimiser = optim.Adam(
             self.policy_network.parameters(),
             lr=learning_rate,
@@ -253,10 +256,11 @@ class PPOAgent(Agent):
             ]
         )  # pi (a_t| s_t) / pi (a_t, s_t) #TODO this isn't working
         clipped_g = torch.clamp(
-            advantage_estimates, 1 - self.epsilon, 1 + self.epsilon
+            network_probability_ratio, 1 - self.epsilon, 1 + self.epsilon
         )  # g(\epsilon, advantage estimates)
         ratio_with_advantage = advantage_estimates * network_probability_ratio
-        ppo_clipped = torch.min(ratio_with_advantage, clipped_g)
+        clipped_with_advantage = advantage_estimates * clipped_g
+        ppo_clipped = torch.min(ratio_with_advantage, clipped_with_advantage)
         policy_loss = -(
             normalisation_factor
             * torch.sum(
