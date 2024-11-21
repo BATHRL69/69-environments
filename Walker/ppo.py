@@ -6,6 +6,8 @@
 # Check if there is anything we need to detach in main loop that we're not detaching
 # Implement rendering
 # Hyper param tuning
+# Line 232: UserWarning: Creating a tensor from a list of numpy.ndarrays is extremely slow. Please consider converting the list to a single numpy.ndarray with numpy.array() before converting to a tensor.
+# Speed up running
 
 import gymnasium as gym
 import numpy as np
@@ -284,7 +286,7 @@ class PPOAgent(Agent):
         self.value_optimiser.step()
         return timesteps_in_trajectory, sum(all_rewards)
 
-    def train(self, num_iterations=1000, log_iterations=10):
+    def train(self, num_iterations=1000, log_iterations=100):
         total_timesteps = 0
         total_reward = []
         average_rewards = []
@@ -342,5 +344,5 @@ class PPOAgent(Agent):
 
 
 env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
-model = PPOAgent(env, observation_space=4, action_space=1, std=0.3)
-model.train(num_iterations=400_000)
+model = PPOAgent(env, observation_space=4, action_space=1, std=0.2)
+model.train(num_iterations=1_000_000)
