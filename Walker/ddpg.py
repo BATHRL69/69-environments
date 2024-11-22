@@ -120,7 +120,7 @@ class DDPGAgent(Agent):
         for observation in data:
             current_state, action, reward, next_state, terminal = observation
             pred = self.critic.get_q_value(current_state, action)
-            loss += (pred - (reward+ self.gamma*(1 - terminal)*self.target_critic.get_q_value(next_state, self.target_actor.get_action(next_state))))
+            loss += (pred - (reward+ self.gamma*(1 - terminal)*self.target_critic.get_q_value(next_state, self.target_actor.get_action(next_state))))**2
             i += 1
             
         if (i != 0):
@@ -133,7 +133,8 @@ class DDPGAgent(Agent):
         loss = 0
         for observation in data: 
             current_state, action, reward, next_state, terminal = observation
-            loss = -self.critic.get_q_value(current_state, self.actor.get_action(current_state))
+            loss += -(self.critic.get_q_value(current_state, self.actor.get_action(current_state)))**2
+            i += 1
 
         if (i != 0):
             loss = loss / i
