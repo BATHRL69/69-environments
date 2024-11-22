@@ -1,5 +1,4 @@
 ## TODO
-# Implement GAE, instead of MC for G(A,S) in state_action_values_mc.
 # Learn STD, instead of a set value.
 # Update loop so that we calculate a batch of trajectories, and learn from them, instead of just one.
 # Check that the old model is definetly frozen.
@@ -116,6 +115,7 @@ class PPOAgent(Agent):
         std=0.1,
         learning_rate=3e-4,
         weight_decay=0,
+        lambda_gae=0.95,
     ):
         # Line 1 of pseudocode
         self.policy_network = PPOPolicyNetwork(observation_space, action_space, std)
@@ -140,6 +140,7 @@ class PPOAgent(Agent):
         self.max_trajectory_timesteps = (
             100000  # Maximum number of timesteps in a trajectory
         )
+        self.lambda_gae = lambda_gae
 
     def transfer_policy_net_to_old(self):
         self.old_policy_network.load_state_dict(self.policy_network.state_dict())
@@ -187,6 +188,8 @@ class PPOAgent(Agent):
         return torch.tensor(
             q_values
         )  # We have already reversed, so need to get our q values back in the order they were given
+    
+
 
     def advantage_estimates(self, states, rewards):
         """
@@ -198,7 +201,32 @@ class PPOAgent(Agent):
             [self.value_network.forward(state) for state in states]
         )  # V(S)
         state_action_value_estimates = self.state_action_values_mc(rewards)  # Q(S,A)
-        return state_action_value_estimates - state_value_estimates  # Q(S,A) - V(S)
+        return state_action_value_estimates - state_value_estimates  # Q(S,A) - V(S)    
+    
+    def advantage_estimates_gae(self, states, rewards):
+        """
+        Use advantage estimation on value network, using GAE
+        """
+
+        values = torch.tensor(
+            [self.value_network.forward(state) for state in states[:-1]]
+        )
+        
+        next_values = torch.tensor(
+            [self.value_network.forward(state) for state in states[1:]]
+        )
+
+        rewards = rewards[:-1]
+
+        deltas = rewards + self.gamma * next_values - values
+        advantages = torch.zeros_like(rewards)
+
+        gae = 0
+        for t in reversed(range(len(deltas))):
+            gae = (gae * self.gamma * self.lambda_gae) + deltas[t]
+            advantages[t] = gae
+    
+        return advantages
 
     def rewards_to_go(self):
         """Calculate rewards to go"""
@@ -223,7 +251,9 @@ class PPOAgent(Agent):
             and not is_truncated
             and timesteps_in_trajectory < self.max_trajectory_timesteps
         ):
+            value = self.value_network(torch.tensor(state, dtype=torch.float32).unsqueeze(0))
             new_state, reward, is_finished, is_truncated, _ = self.env.step(action)
+            next_value = self.value_network(torch.tensor(new_state, dtype=torch.float32).unsqueeze(0))
             trajectories.append(
                 (state, action.detach(), reward, new_state, is_finished, is_truncated)
             )
@@ -236,14 +266,14 @@ class PPOAgent(Agent):
         )  # Append the final trajectory
         ## Get lists of values from our trajectories,
         states = torch.tensor(
-            [this_timestep[0] for this_timestep in trajectories], dtype=torch.float32
+            np.array([this_timestep[0] for this_timestep in trajectories]), dtype=torch.float32
         )
         actions = torch.tensor(
-            [this_timestep[1] for this_timestep in trajectories], dtype=torch.float32
+            np.array([this_timestep[1] for this_timestep in trajectories]), dtype=torch.float32
         )
         all_rewards.extend([this_timestep[2] for this_timestep in trajectories])
         rewards = torch.tensor(
-            [this_timestep[2] for this_timestep in trajectories], dtype=torch.float32
+            np.array([this_timestep[2] for this_timestep in trajectories]), dtype=torch.float32
         )
 
         # Line 4 in pseudocode
@@ -251,7 +281,7 @@ class PPOAgent(Agent):
         rewards_to_go = self.state_action_values_mc(rewards)
         # Line 5 in Pseudocode
         # Compute advantage estimates
-        advantage_estimates = self.advantage_estimates(states, rewards)
+        advantage_estimates = self.advantage_estimates_gae(states, rewards)
         # Line 6 in Pseudocode
         normalisation_factor = 1 / (
             timesteps_in_trajectory
@@ -349,4 +379,4 @@ class PPOAgent(Agent):
 
 env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
 model = PPOAgent(env, observation_space=4, action_space=1, std=0.2)
-model.train(num_iterations=1_000_000)
+model.train(num_iterations=50_000)
