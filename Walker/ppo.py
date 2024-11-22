@@ -38,15 +38,26 @@ class PPOPolicyNetwork(nn.Module):
         observation_space=105,  # Defaults set from ant walker
         action_space=8,  # Defaults set from ant walker
         std=0.1,  # Standard deviation for normal distribution
+        hidden_layers=[32, 32],
+        activation='ReLU',
     ):
         # TODO need to work out what network is going to work best here
         super(PPOPolicyNetwork, self).__init__()
-        self.network = nn.Sequential(
-            nn.Linear(observation_space, 32),
-            nn.Tanh(),
-            nn.Linear(32, action_space),
-            # nn.Tanh(),  # Ant action space is -1 to 1
-        )
+
+        layers = []
+        input_size = observation_space
+
+        for layer_dimension in hidden_layers:
+            layers.append(nn.Linear(input_size, layer_dimension))
+            if activation == 'ReLU':
+                layers.append(nn.ReLU())
+
+            elif activation == 'Tanh':
+                layers.append(nn.Tanh())
+            input_size = layer_dimension
+        
+        layers.append(nn.Linear(hidden_layers[-1], action_space))
+        self.network = nn.Sequential(*layers)
         self.std = std
 
     def get_action(self, state):
@@ -115,10 +126,12 @@ class PPOAgent(Agent):
         learning_rate=3e-4,
         weight_decay=0,
         lambda_gae=0.95,
+        activation = 'ReLU',
+        hidden_layers = [32, 32],
     ):
         # Line 1 of pseudocode
-        self.policy_network = PPOPolicyNetwork(observation_space, action_space, std)
-        self.old_policy_network = PPOPolicyNetwork(observation_space, action_space, std)
+        self.policy_network = PPOPolicyNetwork(observation_space, action_space, std, hidden_layers, activation)
+        self.old_policy_network = PPOPolicyNetwork(observation_space, action_space, std, hidden_layers, activation)
         self.transfer_policy_net_to_old()
         self.policy_optimiser = optim.Adam(
             self.policy_network.parameters(),
@@ -250,9 +263,7 @@ class PPOAgent(Agent):
             and not is_truncated
             and timesteps_in_trajectory < self.max_trajectory_timesteps
         ):
-            value = self.value_network(torch.tensor(state, dtype=torch.float32).unsqueeze(0))
             new_state, reward, is_finished, is_truncated, _ = self.env.step(action)
-            next_value = self.value_network(torch.tensor(new_state, dtype=torch.float32).unsqueeze(0))
             trajectories.append(
                 (state, action.detach(), reward, new_state, is_finished, is_truncated)
             )
@@ -343,6 +354,19 @@ class PPOAgent(Agent):
             total_timesteps += timesteps
         self.plot(average_rewards)
 
+    def efficient_train(self, num_iterations=1000):
+        total_timesteps = 0
+        total_rewards = []
+
+        while total_timesteps < num_iterations:
+            timesteps, reward = self.simulate_episode()  # Simulate an episode and collect rewards
+            total_rewards.append(reward)
+            total_timesteps += timesteps
+
+
+        return total_rewards
+
+
     def plot(self, average_rewards):
         plt.plot(average_rewards)
         plt.show()
@@ -378,4 +402,66 @@ class PPOAgent(Agent):
 
 env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
 model = PPOAgent(env, observation_space=4, action_space=1, std=0.2)
-model.train(num_iterations=50_000)
+#model.train(num_iterations=50_000)
+
+
+
+##################
+# Testing the models
+def test_models(configurations, num_iterations=50000, num_runs=3):
+    results = []
+    for config in configurations:
+        # Create the environment
+        env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
+        
+        # Initialize the model with the given configuration
+        model = PPOAgent(env, 
+                         observation_space=config['observation_space'],
+                         action_space=config['action_space'], 
+                         std=config['std'],
+                         hidden_layers=config['hidden_layers'],
+                         activation=config['activation'])
+
+        run_rewards = []
+        print(f"Training with configuration: obs space={config['observation_space']}, action space={config['action_space']}, std={config['std']}, layers={config['hidden_layers']}, activation={config['activation']}")
+        
+        # Train the model multiple times
+        for _ in range(num_runs):
+            total_rewards = model.efficient_train(num_iterations)
+            run_rewards.append(sum(total_rewards) / len(total_rewards) if total_rewards else 0)
+
+        # Calculate statistics across all runs
+        average_reward = sum(run_rewards) / num_runs
+        max_reward = max(run_rewards)
+        min_reward = min(run_rewards)
+        
+        # Collect results
+        results.append({
+            'configuration': config,
+            'average_reward': average_reward,
+            'max_reward': max_reward,
+            'min_reward': min_reward,
+        })
+
+        # Clean up the environment
+        env.close()
+
+    # Sort results by average reward
+    sorted_results = sorted(results, key=lambda x: x['average_reward'], reverse=True)
+    return sorted_results
+
+def print_results(results):
+    print("\nModel Testing Results:\n")
+    for result in results:
+        config = result['configuration']
+        print(f"Configuration - Observation Space: {config['observation_space']}, Action Space: {config['action_space']}, "
+              f"Std Dev: {config['std']}, Hidden Layers: {config['hidden_layers']}, Activation: {config['activation']}")
+        print(f"Average Reward: {result['average_reward']:.2f}, Max Reward: {result['max_reward']:.2f}, Min Reward: {result['min_reward']:.2f}\n")
+
+configurations = [
+{'observation_space': 4, 'action_space': 1, 'std': 0.1, 'hidden_layers': [64, 64], 'activation': 'ReLU'},
+{'observation_space': 4, 'action_space': 1, 'std': 0.2, 'hidden_layers': [64, 64], 'activation': 'ReLU'},
+{'observation_space': 4, 'action_space': 1, 'std': 0.1, 'hidden_layers': [64, 64], 'activation': 'Tanh'},
+]
+
+print_results(test_models(configurations, num_iterations=10000, num_runs=3))
