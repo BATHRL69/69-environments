@@ -133,7 +133,7 @@ class DDPGAgent(Agent):
         loss = 0
         for observation in data: 
             current_state, action, reward, next_state, terminal = observation
-            loss += -(self.critic.get_q_value(current_state, self.actor.get_action(current_state)))**2
+            loss += -(self.critic.get_q_value(current_state, self.actor.get_action(current_state)))
             i += 1
 
         if (i != 0):
@@ -158,7 +158,10 @@ class DDPGAgent(Agent):
         episodic_rewards = []
 
         total_reward = 0
-        for episode in tqdm(range(num_train_episodes)):
+        print("START SIMULATION")
+        alive = 0
+        lives = 0
+        for episode in (range(num_train_episodes)):
 
             # action -> numpy array
             a = self.actor.get_action(last_s).detach().numpy()
@@ -173,26 +176,36 @@ class DDPGAgent(Agent):
             if done:
                 last_s, _ = self.env.reset()
                 episodic_rewards.append(total_reward)
+                print(lives, "attempt:\n", "died after ", alive, " steps", "total reward", total_reward, "\n")
                 total_reward = 0
+                alive = 0
+                lives += 1
+                
             else:
+                alive += 1
                 last_s = new_s
 
             if episode % self.training_frequency == 0:
                 self.update_weights()
-
+        
         # Plot the episodic curve
-        plt.plot(range(len(self.critic_losses)), self.critic_losses, label="Critic loss")
+        plt.plot(range(len(episodic_rewards)), episodic_rewards, label="Episodic loss")
         plt.xlabel("Episodes")
-        plt.ylabel("Critic Losses")
-        plt.title("DDPG Training Performance")
+        plt.ylabel("Total reward")
         plt.legend()
         plt.show()
 
-        # Plot the episodic curve
+        # Plot the critic loss curve
+        plt.plot(range(len(self.critic_losses)), self.critic_losses, label="Critic loss")
+        plt.xlabel("Episodes")
+        plt.ylabel("Critic Losses")
+        plt.legend()
+        plt.show()
+
+        # Plot the actor loss curve
         plt.plot(range(len(self.actor_losses)), self.actor_losses, label="Actor loss")
         plt.xlabel("Episodes")
         plt.ylabel("Actor Losses")
-        plt.title("DDPG Training Performance")
         plt.legend()
         plt.show()
 
@@ -264,6 +277,8 @@ class ActorNetwork(nn.Module):
     def get_action(self, state):
         
         a = self.forward(torch.as_tensor(state, dtype=torch.float32))
+        # noise = torch.randn(5, 10, 20)
+
         assert isinstance(a, torch.Tensor), f"Expected a PyTorch tensor, but got {type(a)}"
         assert a.dtype == torch.float32, f"Expected tensor of dtype float32, but got {a.dtype}"
         return a
@@ -300,7 +315,7 @@ class CriticNetwork(nn.Module):
 
 if __name__ == "__main__":
 
-    env = gym.make("Walker2d-v4", render_mode=None)
+    env = gym.make("Pendulum", render_mode=None)
     agent = DDPGAgent(env)
     agent.train()
 
