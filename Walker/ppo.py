@@ -5,11 +5,10 @@
 # Check if there is anything we need to detach in main loop that we're not detaching
 # Implement rendering
 # Hyper param tuning
-# Line 232: UserWarning: Creating a tensor from a list of numpy.ndarrays is extremely slow. Please consider converting the list to a single numpy.ndarray with numpy.array() before converting to a tensor.
 # Speed up running
 # Add doc strings
 # Update size of neural network to get best results
-# Try different distributions other than normal
+# Try different distributions other than normal | I think normal is best for our environment.
 # Try on ant
 
 import gymnasium as gym
@@ -60,7 +59,7 @@ class PPOPolicyNetwork(nn.Module):
             torch.tensor: action, probability
         """
         action_values = self.network(state)
-        distribution = Normal(action_values, self.std)  # Std of 1.0
+        distribution = Normal(action_values, self.std)
         action = distribution.sample()
         probability = distribution.log_prob(action)
         return action, probability
