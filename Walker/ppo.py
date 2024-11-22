@@ -3,7 +3,6 @@
 # Update loop so that we calculate a batch of trajectories, and learn from them, instead of just one.
 # Check that the old model is definetly frozen.
 # Check if there is anything we need to detach in main loop that we're not detaching
-# Implement rendering
 # Hyper param tuning
 # Speed up running
 # Add doc strings
@@ -386,7 +385,7 @@ class PPOAgent(Agent):
 
 env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
 model = PPOAgent(env, observation_space=4, action_space=1, std=0.2)
-model.train(num_iterations=10_000, log_iterations=1000)
+model.train(num_iterations=1_000_000, log_iterations=1000)
 print("\n Training finished")
 time.sleep(2)
 print("Rendering...")
