@@ -88,7 +88,6 @@ class SACAgent(Agent):
         self.critics = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
 
         self.critic_targets = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
-        self.polyak_update(0)
 
 
         self.actor_loss = SACPolicyLoss()
@@ -100,16 +99,15 @@ class SACAgent(Agent):
         self.critics_optimiser = optim.Adam(self.critics.parameters(),lr=self.lr)
 
         # line 2 of pseudocode
-        # self.polyak_update(0)
+        self.polyak_update(0)
 
     def polyak_update(self, polyak):
         for (parameter, target_parameter) in zip(self.critics.parameters(), self.critic_targets.parameters()):
             target_parameter.data.copy_((1 - polyak) * parameter.data + polyak * target_parameter.data)
     
-    def update_params(self,memory):
+    def update_params(self,replay_buffer):
         # line 11 of pseudocode
-            old_states, new_states, actions, rewards, terminals = memory.get(self.batch_size)
-            # old_states, new_states, actions, rewards, terminals = self.replay_buffer.sample(self.batch_size)
+            old_states, new_states, actions, rewards, terminals = replay_buffer.get(self.batch_size)
 
             old_states = torch.tensor(old_states, dtype=torch.float32)
             new_states = torch.tensor(new_states, dtype=torch.float32)
@@ -119,7 +117,7 @@ class SACAgent(Agent):
 
             # line 12 of pseudocode
             with torch.no_grad():
-                actor_prediction_new, log_actor_probability_new,_ = self.actor.sample(new_states)
+                actor_prediction_new, log_actor_probability_new = self.actor.sample(new_states)
 
                 critic_target_1_prediction, critic_target_2_prediction = self.critic_targets.forward(new_states,actor_prediction_new)
                 critic_target_clipped = torch.min(critic_target_1_prediction, critic_target_2_prediction)
@@ -141,18 +139,18 @@ class SACAgent(Agent):
             self.critics_optimiser.step()
 
             # line 14 of pseudocode
-            actor_prediction_old, log_actor_probability_old,_ = self.actor.sample(old_states)
+            actor_prediction_old, log_actor_probability_old = self.actor.sample(old_states)
             critic_1_prediction, critic_2_prediction = self.critics.forward(old_states, actor_prediction_old)
             critic_clipped = torch.min(critic_1_prediction, critic_2_prediction)
 
-            # actor_loss = self.actor_loss(critic_clipped, log_actor_probability_old, self.alpha)
-            actor_loss = ((self.alpha * log_actor_probability_old) - critic_clipped).mean() # Jπ = 𝔼st∼D,εt∼N[α * logπ(f(εt;st)|st) − Q(st,f(εt;st))]
+            actor_loss = self.actor_loss(critic_clipped, log_actor_probability_old, self.alpha)
 
 
             self.actor_optimiser.zero_grad()
             actor_loss.backward()
             self.actor_optimiser.step()
-            ############
+
+            ############ SOME VERY BAD LOGGING
             
             detached_loss = total_critic_loss.detach().numpy()
 
@@ -247,9 +245,10 @@ class SACPolicyLoss(nn.Module):
         super(SACPolicyLoss, self).__init__()
     
     def forward(self, min_critic, entropy, alpha):
-        # return torch.mean(alpha*entropy - min_critic)
+        # This way works
+        return torch.mean(alpha*entropy - min_critic)
         # This way correct
-        return torch.mean(min_critic - alpha*entropy)
+        # return torch.mean(min_critic - alpha*entropy)
 
 
 class SACPolicyNetwork(nn.Module):
@@ -276,55 +275,43 @@ class SACPolicyNetwork(nn.Module):
         self.apply(initialize_weights_xavier)
 
     def forward(self, state:torch.Tensor)->torch.Tensor:
-        out = self.ann(state) # is this accuracte? samples a prob dis
+        out = self.ann(state) # samples a prob dis??? idk where this statement came from 
 
         mean = self.mean(out)
 
         log_std = self.log_std(out)
+        # they clamp this between -20 and 2 in the paper i believe
         log_std = torch.clamp(log_std,min=-20,max=2)
 
         return mean, log_std
     
     def sample(self, state:torch.Tensor)->torch.Tensor:
+        ## One issue that was encountered was when trying to do just the std
+        ## as the output, and then logging it without clamping it to appropriate values
+        ## so NAN values would appear due to log 0
+        ## the same thing happened if the term (1-sampled_action.pow(2) wasn't scaled correctly)
+        ## i.e. if you do 1- scaled_action.pow(2), since then scaled_action could be >1 
+        # so you'd get log(negative)
         mean, log_std = self.forward(state)
         std = torch.exp(log_std)
-        # noise = torch.randn_like(std)
 
-        normal = Normal(mean,std)
+        noise = torch.randn_like(std)    
+        
+        probabilities = mean + std * noise
+        sampled_action = torch.tanh(probabilities)
+         # tanh between -1 and 1 so we times by action_max to map it to action space
+        scaled_action = sampled_action * self.action_max
 
-        #rsample has noise included
-        probabilites = normal.rsample()
-        sampled_action = torch.tanh(probabilites)
-        scaled_action = sampled_action*self.action_max
-        log_probs = normal.log_prob(probabilites)
+        log_2pi = torch.log(torch.Tensor([2 * torch.pi]))
+        log_probs = -0.5 * (((probabilities - mean) / std).pow(2) + 2 * log_std + log_2pi)
 
-        #not sure
+        # one reason for epsilon (1e-6) is to avoid log 0, apparently theres other reasons
+        # also idk what this term actually is but they use it in the paper
         log_probs -= torch.log(self.action_max * (1 - sampled_action.pow(2)) + 1e-6)
-        log_probs = log_probs.sum(1, keepdim=True)
-
-        # TRYING AGAIN
-        # probabilities = mean + std * noise
-
-        # tanh between -1 and 1 so we times by action_max to map it to action space
-        # sampled_action = torch.tanh(probabilities)
-        # scaled_action = sampled_action * self.action_max
-
-        # # now we get log probs
-
-        # log_std = torch.log(std)
-        # log_2pi = torch.log(torch.Tensor([2 * torch.pi]))
-        # # i think the below is correct but murrh
-        # log_prob = -0.5 * (((noise - mean) / std) ** 2 + 2 * log_std + log_2pi)
-        # # they subtract the below from the log prob for some reason in the paper
-        # # im just trying to get it working
-        # # WHAT IS GOING ON WHY IS IT NAN
-        # # why 
-        # log_prob -= torch.log(self.action_max * (1 - sampled_action.pow(2)) + 1e-6)
-        # # one reason for epsilon (1e-6) is to avoid log 0, apparently theres other reasons?
-        # log_prob = log_prob.sum(1,keepdim=True)
-
-        #could get it to return mean as the optimal action during evaluation?
-        return scaled_action, log_probs, mean
+        log_probs = log_probs.sum(dim=1, keepdim=True)
+    
+        #could get it to return mean as the 'optimal' action during evaluation?
+        return scaled_action, log_probs
 
 
 class SACValueNetwork(nn.Module):
@@ -556,7 +543,7 @@ class SACValueNetwork(nn.Module):
 
 # env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
 # replay_buffer = ReplayBuffer(1000000,env.observation_space.shape[0],env.action_space._shape[0])
-# model = jiggy(env)
+# model = SACAgent(env)
 # model.train(num_timesteps=200000,replay_buffer = replay_buffer)
 
 
@@ -591,7 +578,7 @@ for i_episode in itertools.count(1):
         if start_steps > total_numsteps:
             action = env.action_space.sample()  # Sample random action
         else:
-            action,_,_ = agent.actor.sample(state)
+            action,_ = agent.actor.sample(state)
             action = action[0].detach().numpy()
             # action = agent.select_action(state).flatten()
 
