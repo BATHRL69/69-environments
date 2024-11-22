@@ -69,7 +69,7 @@ class PPOPolicyNetwork(nn.Module):
         distribution = Normal(action_values, self.std)
         return distribution.log_prob(action)
         # TODO will this action be in the right format for this to work?
-        # TODO We are doing exp to turn our log_prob into probability 0-1. Will do torch.exp in probability ratio method to return this to between 0 and 1
+        # We are doing exp to turn our log_prob into probability 0-1. Will do torch.exp in probability ratio method to return this to between 0 and 1
 
     def evaluate(self, state, action):
         pass
@@ -187,8 +187,6 @@ class PPOAgent(Agent):
         return torch.tensor(
             q_values
         )  # We have already reversed, so need to get our q values back in the order they were given
-    
-
 
     def advantage_estimates(self, states, rewards):
         """
@@ -200,8 +198,8 @@ class PPOAgent(Agent):
             [self.value_network.forward(state) for state in states]
         )  # V(S)
         state_action_value_estimates = self.state_action_values_mc(rewards)  # Q(S,A)
-        return state_action_value_estimates - state_value_estimates  # Q(S,A) - V(S)    
-    
+        return state_action_value_estimates - state_value_estimates  # Q(S,A) - V(S)
+
     def advantage_estimates_gae(self, states, rewards):
         """
         Use advantage estimation on value network, using GAE
@@ -210,7 +208,7 @@ class PPOAgent(Agent):
         values = torch.tensor(
             [self.value_network.forward(state) for state in states[:-1]]
         )
-        
+
         next_values = torch.tensor(
             [self.value_network.forward(state) for state in states[1:]]
         )
@@ -224,7 +222,7 @@ class PPOAgent(Agent):
         for t in reversed(range(len(deltas))):
             gae = (gae * self.gamma * self.lambda_gae) + deltas[t]
             advantages[t] = gae
-    
+
         return advantages
 
     def rewards_to_go(self):
@@ -250,9 +248,13 @@ class PPOAgent(Agent):
             and not is_truncated
             and timesteps_in_trajectory < self.max_trajectory_timesteps
         ):
-            value = self.value_network(torch.tensor(state, dtype=torch.float32).unsqueeze(0))
+            value = self.value_network(
+                torch.tensor(state, dtype=torch.float32).unsqueeze(0)
+            )
             new_state, reward, is_finished, is_truncated, _ = self.env.step(action)
-            next_value = self.value_network(torch.tensor(new_state, dtype=torch.float32).unsqueeze(0))
+            next_value = self.value_network(
+                torch.tensor(new_state, dtype=torch.float32).unsqueeze(0)
+            )
             trajectories.append(
                 (state, action.detach(), reward, new_state, is_finished, is_truncated)
             )
@@ -265,14 +267,17 @@ class PPOAgent(Agent):
         )  # Append the final trajectory
         ## Get lists of values from our trajectories,
         states = torch.tensor(
-            np.array([this_timestep[0] for this_timestep in trajectories]), dtype=torch.float32
+            np.array([this_timestep[0] for this_timestep in trajectories]),
+            dtype=torch.float32,
         )
         actions = torch.tensor(
-            np.array([this_timestep[1] for this_timestep in trajectories]), dtype=torch.float32
+            np.array([this_timestep[1] for this_timestep in trajectories]),
+            dtype=torch.float32,
         )
         all_rewards.extend([this_timestep[2] for this_timestep in trajectories])
         rewards = torch.tensor(
-            np.array([this_timestep[2] for this_timestep in trajectories]), dtype=torch.float32
+            np.array([this_timestep[2] for this_timestep in trajectories]),
+            dtype=torch.float32,
         )
 
         # Line 4 in pseudocode
@@ -378,4 +383,4 @@ class PPOAgent(Agent):
 
 env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
 model = PPOAgent(env, observation_space=4, action_space=1, std=0.2)
-model.train(num_iterations=50_000)
+model.train(num_iterations=100_000)
