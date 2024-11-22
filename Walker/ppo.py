@@ -22,6 +22,7 @@ from torch.distributions import Uniform, Normal
 from ppo_constants import *
 import torch.optim as optim
 import matplotlib.pyplot as plt
+import time
 
 
 class PPOPolicyNetwork(nn.Module):
@@ -324,19 +325,18 @@ class PPOAgent(Agent):
         self.value_optimiser.step()
         return timesteps_in_trajectory, sum(all_rewards)
 
-    def train(self, num_iterations=1000, log_iterations=100):
+    def train(self, num_iterations=100_000, log_iterations=100):
         total_timesteps = 0
         total_reward = []
         average_rewards = []
+        last_log = 0
         while total_timesteps < num_iterations:
 
             timesteps, reward = (
                 self.simulate_episode()
             )  # Taking total reward here because we want to maximise total reward, which is keeping pendulum up
             total_reward.append(reward)
-            if (
-                total_timesteps % log_iterations == 0
-            ):  # TODO we don't have the same number of timesteps at each step so this isn't logging every time
+            if total_timesteps - last_log > log_iterations:
                 average_reward = sum(total_reward) / len(total_reward)
                 print(
                     f"\r Processing Progress: {(total_timesteps/ num_iterations * 100):.2f}% Average reward:{average_reward:.2f} ",
@@ -345,6 +345,7 @@ class PPOAgent(Agent):
                 )
                 average_rewards.append(average_reward)
                 total_reward = []
+                last_log = total_timesteps
             total_timesteps += timesteps
         self.plot(average_rewards)
 
@@ -352,8 +353,9 @@ class PPOAgent(Agent):
         plt.plot(average_rewards)
         plt.show()
 
-    def predict(self):
-        pass
+    def predict(self, state):
+        action, _ = self.policy_network.get_action(state)
+        return action
 
     def save(self, path):
         """Pickle save our policy and value_networks
@@ -383,4 +385,8 @@ class PPOAgent(Agent):
 
 env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
 model = PPOAgent(env, observation_space=4, action_space=1, std=0.2)
-model.train(num_iterations=100_000)
+model.train(num_iterations=10_000, log_iterations=1000)
+print("\n Training finished")
+time.sleep(10)
+print("Rendering...")
+model.render(num_timesteps=10_000)
