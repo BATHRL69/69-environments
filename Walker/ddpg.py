@@ -50,7 +50,7 @@ class DDPGAgent(Agent):
             self,
             env,
             max_buffer_size: int = 100000,
-            replay_sample_size: int = 10,
+            replay_sample_size: int = 128,
             actor_lr: float = 0.0001,
             critic_lr: float = 0.0001,
             polyak: float = 0.995,
@@ -141,7 +141,7 @@ class DDPGAgent(Agent):
 
         return loss 
 
-    def train(self, num_train_episodes=100000, start_steps=100):
+    def train(self, num_train_episodes=100000, start_steps=100000):
 
         last_s, _ = self.env.reset()
 
@@ -170,18 +170,19 @@ class DDPGAgent(Agent):
             assert isinstance(a, np.ndarray), f"Expected a NumPy array, but got {type(a)}"
 
             new_s, reward, terminated, truncated, *args = self.env.step(a)
-            total_reward += reward
+
             done = terminated or truncated
             self.replay_buffer.add((last_s, a, reward, new_s, done))
             if done:
-                last_s, _ = self.env.reset()
                 episodic_rewards.append(total_reward)
                 print(lives, "attempt:\n", "died after ", alive, " steps", "total reward", total_reward, "\n")
                 total_reward = 0
                 alive = 0
                 lives += 1
-                
+                last_s, _ = self.env.reset()
+
             else:
+                total_reward += reward
                 alive += 1
                 last_s = new_s
 
