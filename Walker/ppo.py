@@ -354,7 +354,8 @@ class PPOAgent(Agent):
         plt.show()
 
     def predict(self, state):
-        action, _ = self.policy_network.get_action(state)
+        with torch.no_grad():
+            action, _ = self.policy_network.get_action(state)
         return action
 
     def save(self, path):
@@ -387,6 +388,6 @@ env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
 model = PPOAgent(env, observation_space=4, action_space=1, std=0.2)
 model.train(num_iterations=10_000, log_iterations=1000)
 print("\n Training finished")
-time.sleep(10)
+time.sleep(2)
 print("Rendering...")
 model.render(num_timesteps=10_000)
