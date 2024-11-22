@@ -275,9 +275,10 @@ class ActorNetwork(nn.Module):
     
 
     def get_action(self, state):
-        
+        noise_rate = 0.1
         a = self.forward(torch.as_tensor(state, dtype=torch.float32))
-        # noise = torch.randn(5, 10, 20)
+        noise = torch.randn(a.shape)
+        a += noise * noise_rate
 
         assert isinstance(a, torch.Tensor), f"Expected a PyTorch tensor, but got {type(a)}"
         assert a.dtype == torch.float32, f"Expected tensor of dtype float32, but got {a.dtype}"
