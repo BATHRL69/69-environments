@@ -157,6 +157,8 @@ class SACValueNetwork(nn.Module):
 ## WORKING AGENT
 class SACAgent(Agent):
     def __init__(self, env: gym.Env, update_threshold: int=1, batch_size: int=256, lr: float=3e-4, gamma: float=0.99, polyak=0.995, alpha:float=0.2):
+        super(SACAgent, self).__init__(env)
+
         # line 1 of pseudocode
         self.env = env
         self.update_threshold = update_threshold
@@ -196,21 +198,21 @@ class SACAgent(Agent):
             target_parameter.data.copy_((1 - polyak) * parameter.data + polyak * target_parameter.data)
 
 
-    def train(self, num_timesteps=50000, print_interval=50, start_timesteps=2000):
+    def train(self, num_timesteps=50000, start_timesteps=1000):
         """Train the agent over a given number of episodes."""
         self.persistent_timesteps = 0
         timesteps = 0
-        episodes = 0
+
+        self.reward_list.append(0)
+        self.timestep_list.append(0)
+
+        print(f"Populating replay buffer with {start_timesteps} timesteps of experience...")
 
         while timesteps < start_timesteps:
             elapsed_timesteps, _ = self.simulate_episode(should_learn=False)
             timesteps += elapsed_timesteps
-            episodes += 1
-
-            if (episodes % print_interval == 0):
-                print(f"Start timesteps {100 * timesteps / start_timesteps:.2f}% complete...")
-        
-        super().train(num_timesteps - timesteps, print_interval)
+                
+        super().train(num_timesteps=num_timesteps, start_timesteps=start_timesteps)
 
 
     def simulate_episode(self, should_learn=True):
@@ -303,9 +305,14 @@ class SACAgent(Agent):
         self.polyak_update(self.polyak)
 
 
-env = gym.make("InvertedPendulum-v4")
+    def predict(self, state):
+        return self.actor.sample(state.unsqueeze(0))[0].detach().numpy()[0]
+
+
+env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
 
 agent = SACAgent(env)
-agent.train()
+agent.train(num_timesteps=2000, start_timesteps=1000)
+agent.render()
 
 env.close()

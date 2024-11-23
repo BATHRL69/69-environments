@@ -130,6 +130,8 @@ class PPOAgent(Agent):
         activation = 'ReLU',
         hidden_layers = [32, 32],
     ):
+        super(PPOAgent, self).__init__(env)
+
         # Line 1 of pseudocode
         self.policy_network = PPOPolicyNetwork(observation_space, action_space, std, hidden_layers, activation)
         self.old_policy_network = PPOPolicyNetwork(observation_space, action_space, std, hidden_layers, activation)
@@ -145,7 +147,6 @@ class PPOAgent(Agent):
             lr=learning_rate,
             weight_decay=weight_decay,
         )
-        self.env = env
         self.epsilon = (
             epsilon  # How large of a step we will take with updates used in PPO-Clip
         )
