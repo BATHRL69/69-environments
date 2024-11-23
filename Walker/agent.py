@@ -27,7 +27,7 @@ class Agent:
             self.reward_list.append(reward)
             self.timestep_list.append(timesteps)
 
-            print(f"[Episode {episodes} / timestep {timesteps}] Received reward {reward}")
+            print(f"[Episode {episodes} / timestep {timesteps}] Received reward {reward:.3f}")
 
     def predict(self, state):
         """Predict the best action for the current state."""

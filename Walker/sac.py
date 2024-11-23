@@ -1,5 +1,7 @@
 import gymnasium as gym
 import numpy as np
+import os
+import pickle
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -307,12 +309,38 @@ class SACAgent(Agent):
 
     def predict(self, state):
         return self.actor.sample(state.unsqueeze(0))[0].detach().numpy()[0]
+    
+
+    def save(self, path):
+        print(f"Saving model to {path}...")
+        with open(path, "wb") as file:
+            pickle.dump((self.actor.state_dict(), 
+                         self.critics.state_dict(), 
+                         self.critic_targets.state_dict(), 
+                         self.actor_optimiser.state_dict(),
+                         self.critics_optimiser.state_dict(),
+                         self.replay_buffer), file)
+
+    
+    def load(self, path):
+        if os.path.exists(path):
+            print(f"Loading model from {path}...")
+            with open(path, "rb") as file:
+                actor_dict, critics_dict, critic_targets_dict, actor_optim_dict, critics_optim_dict, self.replay_buffer = pickle.load(file)
+                self.actor.load_state_dict(actor_dict)
+                self.critics.load_state_dict(critics_dict)
+                self.critic_targets.load_state_dict(critic_targets_dict)
+                self.actor_optimiser.load_state_dict(actor_optim_dict)
+                self.critics_optimiser.load_state_dict(critics_optim_dict)
 
 
 env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
+SAVE_PATH = "sac_pendulum.data"
 
 agent = SACAgent(env)
-agent.train(num_timesteps=2000, start_timesteps=1000)
+agent.load(SAVE_PATH)
+agent.train(num_timesteps=10000, start_timesteps=500)
+agent.save(SAVE_PATH)
 agent.render()
 
 env.close()
