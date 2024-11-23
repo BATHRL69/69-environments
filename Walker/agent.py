@@ -1,23 +1,33 @@
 import cv2
+import gymnasium as gym
+import matplotlib.pyplot as plt
 import torch
 
 
 class Agent:
+    def __init__(self, env: gym.Env):
+        self.env = env
+        self.reward_list = []
+        self.timestep_list = []
+
     def simulate_episode(self):
         """Run a single training episode."""
         raise NotImplementedError
 
-    def train(self, num_episodes=1000):
+    def train(self, num_timesteps=100000, start_timesteps=0):
         """Train the agent over a given number of episodes."""
-        ten_percent = min(
-            1, int(num_episodes / 10)
-        )  # in case num_episodes < 10 and we try to divide by 0
+        timesteps = start_timesteps
+        episodes = 0
+        
+        while timesteps < num_timesteps:
+            elapsed_timesteps, reward = self.simulate_episode()
+            timesteps += elapsed_timesteps
+            episodes += 1
 
-        for i in range(num_episodes):
-            self.simulate_episode()
+            self.reward_list.append(reward)
+            self.timestep_list.append(timesteps)
 
-            if i % ten_percent == 0:
-                print(f"Training {10 * i / ten_percent}% complete...")
+            print(f"[Episode {episodes} / timestep {timesteps}] Received reward {reward}")
 
     def predict(self, state):
         """Predict the best action for the current state."""
@@ -51,3 +61,10 @@ class Agent:
             if is_finished:
                 state, _info = self.env.reset()
                 state = torch.tensor(state, dtype=torch.float32)
+        
+        plt.figure()
+        plt.title("Training Reward Curve")
+        plt.xlabel("Timesteps")
+        plt.ylabel("Reward")
+        plt.plot(self.timestep_list, self.reward_list, color="green")
+        plt.show()
