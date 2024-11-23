@@ -1,4 +1,6 @@
-import matplotlib.pyplot as plt
+import cv2
+import torch
+
 
 class Agent:
     def simulate_episode(self):
@@ -33,11 +35,32 @@ class Agent:
     def predict(self, state):
         """Predict the best action for the current state."""
         raise NotImplementedError
-    
+
     def save(self, path):
         """Save the agent's data to the path specified."""
         raise NotImplementedError
-    
+
     def load(self, path):
         """Load the data from the path specified."""
         raise NotImplementedError
+
+    def render(self, num_timesteps=10_000):
+        state, _info = self.env.reset()
+        state = torch.tensor(state, dtype=torch.float32)
+        for _ in range(num_timesteps):
+            action = self.predict(state)
+            new_state, _reward, is_finished, _is_truncated, _info = self.env.step(
+                action
+            )
+            img = self.env.render()
+            state = torch.tensor(new_state, dtype=torch.float32)
+
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            cv2.imshow("", img)
+
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                break
+
+            if is_finished:
+                state, _info = self.env.reset()
+                state = torch.tensor(state, dtype=torch.float32)

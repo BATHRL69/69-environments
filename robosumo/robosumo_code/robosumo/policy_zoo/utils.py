@@ -1,83 +1,91 @@
 """
-A variety of utilities.
+A variety of utilities updated for TensorFlow 2.x.
 """
+
 import copy
 import numpy as np
 import tensorflow as tf
+import tensorflow_probability as tfp
 
+tfd = tfp.distributions
 
-class RunningMeanStd(object):
-    def __init__(self, scope="running", reuse=False, epsilon=1e-2, shape=()):
-        with tf.variable_scope(scope, reuse=reuse):
-            self._sum = tf.get_variable(
-                dtype=tf.float32,
-                shape=shape,
-                initializer=tf.constant_initializer(0.0),
-                name="sum", trainable=False)
-            self._sumsq = tf.get_variable(
-                dtype=tf.float32,
-                shape=shape,
-                initializer=tf.constant_initializer(epsilon),
-                name="sumsq", trainable=False)
-            self._count = tf.get_variable(
-                dtype=tf.float32,
-                shape=(),
-                initializer=tf.constant_initializer(epsilon),
-                name="count", trainable=False)
-            self.shape = shape
+class RunningMeanStd:
+    def __init__(self, epsilon=1e-2, shape=()):
+        self.shape = shape
 
-            self.mean = tf.to_float(self._sum / self._count)
-            var_est = tf.to_float(self._sumsq / self._count) - tf.square(self.mean)
-            self.std = tf.sqrt(tf.maximum(var_est, 1e-2))
+        self._sum = tf.Variable(
+            initial_value=tf.zeros(shape, dtype=tf.float32),
+            trainable=False,
+            name="sum")
+        self._sumsq = tf.Variable(
+            initial_value=tf.zeros(shape, dtype=tf.float32),
+            trainable=False,
+            name="sumsq")
+        self._count = tf.Variable(
+            initial_value=epsilon,
+            trainable=False,
+            name="count",
+            dtype=tf.float32)
 
+    @property
+    def mean(self):
+        return self._sum / self._count
 
-class DiagonalGaussian(object):
+    @property
+    def std(self):
+        var_est = (self._sumsq / self._count) - tf.square(self.mean)
+        return tf.sqrt(tf.maximum(var_est, 1e-2))
+
+    def update(self, x):
+        x = tf.convert_to_tensor(x, dtype=tf.float32)
+        batch_sum = tf.reduce_sum(x, axis=0)
+        batch_sumsq = tf.reduce_sum(tf.square(x), axis=0)
+        batch_count = tf.cast(tf.shape(x)[0], tf.float32)
+
+        self._sum.assign_add(batch_sum)
+        self._sumsq.assign_add(batch_sumsq)
+        self._count.assign_add(batch_count)
+
+class DiagonalGaussian:
     def __init__(self, mean, logstd):
         self.mean = mean
         self.logstd = logstd
         self.std = tf.exp(logstd)
+        self.distribution = tfd.MultivariateNormalDiag(
+            loc=self.mean,
+            scale_diag=self.std)
 
     def sample(self):
-        return self.mean + self.std * tf.random_normal(tf.shape(self.mean))
+        return self.distribution.sample()
 
     def mode(self):
         return self.mean
 
-
 def dense(x, size, name, weight_init=None, bias=True):
-    w = tf.get_variable(name + "/w", [x.get_shape()[1], size],
-                        initializer=weight_init)
-    ret = tf.matmul(x, w)
-    if bias:
-        b = tf.get_variable(name + "/b", [size], initializer=tf.zeros_initializer())
-        return ret + b
-    else:
-        return ret
-
+    layer = tf.keras.layers.Dense(
+        units=size,
+        activation=None,
+        use_bias=bias,
+        kernel_initializer=weight_init,
+        name=name)
+    return layer(x)
 
 def switch(condition, if_exp, else_exp):
-    x_shape = copy.copy(if_exp.get_shape())
-    x = tf.cond(tf.cast(condition, 'bool'),
-                lambda: if_exp,
-                lambda: else_exp)
-    x.set_shape(x_shape)
+    condition = tf.cast(condition, tf.bool)
+    x = tf.cond(condition, lambda: if_exp, lambda: else_exp)
     return x
 
-
 def load_params(path):
-    return np.load(path)
-
+    return np.load(path, allow_pickle=True)
 
 def set_from_flat(var_list, flat_params):
-    shapes = list(map(lambda x: x.get_shape().as_list(), var_list))
+    shapes = [v.shape.as_list() for v in var_list]
     total_size = np.sum([int(np.prod(shape)) for shape in shapes])
-    theta = tf.placeholder(tf.float32, [total_size])
+    assert flat_params.size == total_size, "Size mismatch"
+
     start = 0
-    assigns = []
-    for (shape, v) in zip(shapes, var_list):
+    for shape, v in zip(shapes, var_list):
         size = int(np.prod(shape))
-        assign = tf.assign(v, tf.reshape(theta[start:start + size], shape))
-        assigns.append(assign)
+        param_values = flat_params[start:start + size].reshape(shape)
+        v.assign(param_values)
         start += size
-    op = tf.group(*assigns)
-    tf.get_default_session().run(op, {theta: flat_params})
