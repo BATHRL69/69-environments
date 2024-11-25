@@ -270,14 +270,13 @@ class SACAgent(Agent):
         terminals = torch.tensor(terminals, dtype=torch.float32).unsqueeze(1)
 
         # line 12 of pseudocode
-        with torch.no_grad():
-            actor_prediction_new, log_actor_probability_new = self.actor.sample(new_states)
+        actor_prediction_new, log_actor_probability_new = self.actor.sample(new_states)
 
-            critic_target_1_prediction, critic_target_2_prediction = self.critic_targets.forward(new_states, actor_prediction_new)
-            critic_target_clipped = torch.min(critic_target_1_prediction, critic_target_2_prediction)
+        critic_target_1_prediction, critic_target_2_prediction = self.critic_targets.forward(new_states, actor_prediction_new)
+        critic_target_clipped = torch.min(critic_target_1_prediction, critic_target_2_prediction)
 
-            predicted_target_reward = critic_target_clipped - self.alpha * log_actor_probability_new
-            target = rewards + self.gamma * (1 - terminals) * predicted_target_reward
+        predicted_target_reward = critic_target_clipped - self.alpha * log_actor_probability_new
+        target = rewards + self.gamma * (1 - terminals) * predicted_target_reward
 
         # line 13 of pseudocode
         critic_1_evaluation, critic_2_evaluation = self.critics.forward(old_states, actions)
