@@ -54,7 +54,7 @@ class Agent:
         for _ in range(num_timesteps):
             action = self.predict(state)
             new_state, _reward, is_finished, _is_truncated, _info = self.env.step(
-                action
+                action.detach().numpy()
             )
             img = self.env.render()
             state = torch.tensor(new_state, dtype=torch.float32)

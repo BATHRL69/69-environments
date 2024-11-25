@@ -346,7 +346,7 @@ class PPOAgent(Agent):
             [self.value_network.forward(this_state) for this_state in states],
             requires_grad=True,
         )
-        value_loss = (normalisation_factor) * torch.mean(
+        value_loss = normalisation_factor * torch.mean(
             torch.square(value_estimates - rewards_to_go)
         )  # TODO pseudocode has this as SUM, but it's mean squared error. Need to workout which one works better
         value_loss.backward()
@@ -422,9 +422,8 @@ class PPOAgent(Agent):
         Returns:
             torch.Tensor: The best action to take in state S
         """
-        # TODO might want to update this so we get the best action, instead of sampling from a distribution
         with torch.no_grad():
-            action, _ = self.policy_network.get_action(state)
+            action = self.policy_network.forward(state)
         return action
 
     def save(self, path):
@@ -463,9 +462,9 @@ def verbose_train(environment):
         env,
         observation_space=environment["observation_space"],
         action_space=environment["action_space"],
-        std=0.2,
+        std=0.3,
     )
-    model.train(num_iterations=1_000_000, log_iterations=1000)
+    model.train(num_iterations=100_000, log_iterations=1000)
     print("\n Training finished")
     print("Rendering...")
     model.render(num_timesteps=10_000)
