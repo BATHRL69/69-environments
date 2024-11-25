@@ -53,10 +53,8 @@ class SACPolicyLoss(nn.Module):
     
 
     def forward(self, min_critic, entropy, alpha):
-        # This way works
+        # gradient ASCENT - negate the loss function in the pseudocode, since our optimiser will perform gradient DESCENT
         return torch.mean(alpha * entropy - min_critic)
-        # This way correct (according to spinning up pseudocode)
-        # return torch.mean(min_critic - alpha * entropy)
 
 
 class SACPolicyNetwork(nn.Module):
@@ -334,13 +332,25 @@ class SACAgent(Agent):
                 self.critics_optimiser.load_state_dict(critics_optim_dict)
 
 
-env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
-SAVE_PATH = "sac_pendulum.data"
+env = gym.make("Ant-v4", render_mode="rgb_array")
+SAVE_PATH = "sac_ant.data"
 
 agent = SACAgent(env)
 agent.load(SAVE_PATH)
-agent.train(num_timesteps=10000, start_timesteps=500)
-agent.save(SAVE_PATH)
+# agent.train(num_timesteps=50000, start_timesteps=0)
+# agent.save(SAVE_PATH)
+agent.render()
+
+# env.close()
+
+
+env = gym.make("Humanoid-v4", render_mode="rgb_array")
+SAVE_PATH = "sac_humanoid.data"
+
+agent = SACAgent(env)
+agent.load(SAVE_PATH)
+#agent.train(num_timesteps=150000, start_timesteps=0)
+#agent.save(SAVE_PATH)
 agent.render()
 
 env.close()

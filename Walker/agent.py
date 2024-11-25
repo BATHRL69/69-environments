@@ -46,7 +46,7 @@ class Agent:
         state = torch.tensor(state, dtype=torch.float32)
         for _ in range(num_timesteps):
             action = self.predict(state)
-            new_state, _reward, is_finished, _is_truncated, _info = self.env.step(
+            new_state, _reward, is_finished, is_truncated, _info = self.env.step(
                 action
             )
             img = self.env.render()
@@ -58,7 +58,7 @@ class Agent:
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
 
-            if is_finished:
+            if is_finished or is_truncated:
                 state, _info = self.env.reset()
                 state = torch.tensor(state, dtype=torch.float32)
         
