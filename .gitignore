@@ -4,3 +4,6 @@ venv
 Environment testing/Arcade games/Wrestelmania/*
 Walker/.venv/
 .vscode/settings.json
+Environment testing/Parking/tactics2d
+stable-retro
+.idea
