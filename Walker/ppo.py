@@ -5,10 +5,10 @@
 # Check if there is anything we need to detach in main loop that we're not detaching
 # Hyper param tuning
 # Speed up running
-# Add doc strings
 # Update size of neural network to get best results
 # Try different distributions other than normal | I think normal is best for our environment.
 # Try on ant
+# Add entropy bonus
 
 import gymnasium as gym
 import numpy as np
@@ -28,9 +28,6 @@ class PPOPolicyNetwork(nn.Module):
     """This is sometimes also called the ACTOR network.
     Basically, the goal of this network is to take in a state, and give us the best possible actions to take in that state.
     We will do this with a neural net that takes in the observation space, and outputs action space values.
-
-    Args:
-        nn (_type_): _description_
     """
 
     def __init__(
@@ -39,7 +36,7 @@ class PPOPolicyNetwork(nn.Module):
         action_space=8,  # Defaults set from ant walker
         std=0.1,  # Standard deviation for normal distribution
         hidden_layers=[32, 32],
-        activation='ReLU',
+        activation="ReLU",
     ):
         # TODO need to work out what network is going to work best here
         super(PPOPolicyNetwork, self).__init__()
@@ -49,13 +46,13 @@ class PPOPolicyNetwork(nn.Module):
 
         for layer_dimension in hidden_layers:
             layers.append(nn.Linear(input_size, layer_dimension))
-            if activation == 'ReLU':
+            if activation == "ReLU":
                 layers.append(nn.ReLU())
 
-            elif activation == 'Tanh':
+            elif activation == "Tanh":
                 layers.append(nn.Tanh())
             input_size = layer_dimension
-        
+
         layers.append(nn.Linear(hidden_layers[-1], action_space))
         self.network = nn.Sequential(*layers)
         self.std = std
@@ -76,6 +73,15 @@ class PPOPolicyNetwork(nn.Module):
         return action, probability
 
     def get_probability_given_action(self, state, action):
+        """Takes in the state and action, and returns the log probability of that action, given the state. So P(A|S), assuming a normal distribution
+
+        Args:
+            state (torch.Tensor): The current state
+            action (torch.Tensor): The action to be taken in this state
+
+        Returns:
+            torch.Tensor: the log-probability of action given state
+        """
         action_values = self.network(state)
         distribution = Normal(action_values, self.std)
         return distribution.log_prob(action)
@@ -93,8 +99,6 @@ class PPOValueNetwork(nn.Module):
     """This is sometimes also called the CRITIC network.
     Basically, this network will give us the predicted return for a single state (observation space), given all of our observations
 
-    Args:
-        nn (_type_): _description_
     """
 
     def __init__(
@@ -126,14 +130,18 @@ class PPOAgent(Agent):
         learning_rate=3e-4,
         weight_decay=0,
         lambda_gae=0.95,
-        activation = 'ReLU',
-        hidden_layers = [32, 32],
+        activation="ReLU",
+        hidden_layers=[32, 32],
     ):
         super(PPOAgent, self).__init__(env)
 
         # Line 1 of pseudocode
-        self.policy_network = PPOPolicyNetwork(observation_space, action_space, std, hidden_layers, activation)
-        self.old_policy_network = PPOPolicyNetwork(observation_space, action_space, std, hidden_layers, activation)
+        self.policy_network = PPOPolicyNetwork(
+            observation_space, action_space, std, hidden_layers, activation
+        )
+        self.old_policy_network = PPOPolicyNetwork(
+            observation_space, action_space, std, hidden_layers, activation
+        )
         self.transfer_policy_net_to_old()
         self.policy_optimiser = optim.Adam(
             self.policy_network.parameters(),
@@ -156,17 +164,18 @@ class PPOAgent(Agent):
         self.lambda_gae = lambda_gae
 
     def transfer_policy_net_to_old(self):
+        """Copies our current policy into self.old_policy_network"""
         self.old_policy_network.load_state_dict(self.policy_network.state_dict())
 
     def probability_ratios(self, state, action):
         """Calculate our probability ratio , which is:
         Ratio = new_policy(state,action) / old_policy(state,action)
         Args:
-            state (_type_): S_t
-            action (_type_): A_t
+            state (torch.Tensor): S_t, the state at timestep t
+            action (torch.Tensor): A_t, the action to calculate probability ratio for, at time step t
 
         Returns:
-            _type_: probability ratio
+            torch.Tensor: probability ratio of action, given state.
         """
         current_log_prob = self.policy_network.get_probability_given_action(
             state, action
@@ -187,8 +196,12 @@ class PPOAgent(Agent):
         """
 
     def state_action_values_mc(self, rewards):
-        """Compute Q value, this is the value of taking a state, and action, and then following the policy thereafter"""
-        # TODO At the moment we are using monte carlo, but this could be improved with GAE
+        """Compute Q value, this is the value of taking a state, and action, and then following the policy thereafter
+        Args:
+            rewards (torch.Tensor): a list of the rewards in our trajectory
+        Returns:
+            torch.Tensor: A tensor, list of state action rewards for each step in our trajectory
+        """
         total_reward = 0
         q_values = []
         reversed_rewards = reversed(rewards)
@@ -202,11 +215,18 @@ class PPOAgent(Agent):
             q_values
         )  # We have already reversed, so need to get our q values back in the order they were given
 
-    def advantage_estimates(self, states, rewards):
+    def advantage_estimates_mc(self, states, rewards):
         """
-        Use advantage estimation on value network,
+        Takes in states and corresponding rewards, and calculate the advantage estimates for each state.
+        This advantage estimate tells us how much better the state action pairs in our trajectory where than current.
+        This is done by subtracting the value of taking action A in state S, and following the policy thereafter, from just following the policy in state.
+        Q(S,A) is calculated using MC estimation at the moment, V(S) is from our value/critic network.
+        Q(S,A) - V(S)
         Args:
+            states (torch.Tensor) :
+            rewards (torch.Tensor) :
         Returns:
+            torch.Tensor: The advantage estimate for each step in trajectory.
         """
         state_value_estimates = torch.tensor(
             [self.value_network.forward(state) for state in states]
@@ -238,11 +258,6 @@ class PPOAgent(Agent):
             advantages[t] = gae
 
         return advantages
-
-    def rewards_to_go(self):
-        """Calculate rewards to go"""
-
-        pass
 
     def simulate_episode(self):
         """Simulate a single episode, called by train method on parent class"""
@@ -333,6 +348,12 @@ class PPOAgent(Agent):
         return timesteps_in_trajectory, sum(all_rewards)
 
     def train(self, num_iterations=100_000, log_iterations=100):
+        """Train our agent for "n" timesteps
+
+        Args:
+            num_iterations (int, optional): The number of timesteps to run until. Defaults to 100_000.
+            log_iterations (int, optional): Logs after every n timesteps. Defaults to 100.
+        """
         total_timesteps = 0
         total_reward = []
         average_rewards = []
@@ -357,23 +378,45 @@ class PPOAgent(Agent):
         self.plot(average_rewards)
 
     def efficient_train(self, num_iterations=1000):
+        """Train our model for n iterations, without logging or plotting
+
+        Args:
+            num_iterations (int, optional): number of timesteps to run until. Defaults to 1000.
+
+        Returns:
+            array: Total rewards, for each training iteration
+        """
         total_timesteps = 0
         total_rewards = []
 
         while total_timesteps < num_iterations:
-            timesteps, reward = self.simulate_episode()  # Simulate an episode and collect rewards
+            timesteps, reward = (
+                self.simulate_episode()
+            )  # Simulate an episode and collect rewards
             total_rewards.append(reward)
             total_timesteps += timesteps
 
-
         return total_rewards
 
-
     def plot(self, average_rewards):
+        """Plot the average rewards other time
+
+        Args:
+            average_rewards (array): The average reward for each logging timestep
+        """
         plt.plot(average_rewards)
         plt.show()
 
     def predict(self, state):
+        """Predict the best action
+
+        Args:
+            state (torch.Tensor): The state to predict best action for
+
+        Returns:
+            torch.Tensor: The best action to take in state S
+        """
+        # TODO might want to update this so we get the best action, instead of sampling from a distribution
         with torch.no_grad():
             action, _ = self.policy_network.get_action(state)
         return action
@@ -391,7 +434,6 @@ class PPOAgent(Agent):
 
     def load(self, path):
         """Pickle load our policy and value networks
-
         Args:
             path (str): Path to load policy and value networks
         """
@@ -406,12 +448,11 @@ class PPOAgent(Agent):
 
 env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
 model = PPOAgent(env, observation_space=4, action_space=1, std=0.2)
-#model.train(num_iterations=10_000, log_iterations=1000)
-#print("\n Training finished")
-#time.sleep(2)
-#print("Rendering...")
-#model.render(num_timesteps=10_000)
-
+model.train(num_iterations=10_000, log_iterations=1000)
+print("\n Training finished")
+time.sleep(2)
+print("Rendering...")
+model.render(num_timesteps=10_000)
 
 
 ##################
@@ -421,55 +462,87 @@ def test_models(configurations, num_iterations=50000, num_runs=3):
     for config in configurations:
         # Create the environment
         env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
-        
+
         # Initialize the model with the given configuration
-        model = PPOAgent(env, 
-                         observation_space=config['observation_space'],
-                         action_space=config['action_space'], 
-                         std=config['std'],
-                         hidden_layers=config['hidden_layers'],
-                         activation=config['activation'])
+        model = PPOAgent(
+            env,
+            observation_space=config["observation_space"],
+            action_space=config["action_space"],
+            std=config["std"],
+            hidden_layers=config["hidden_layers"],
+            activation=config["activation"],
+        )
 
         run_rewards = []
-        print(f"Training with configuration: obs space={config['observation_space']}, action space={config['action_space']}, std={config['std']}, layers={config['hidden_layers']}, activation={config['activation']}")
-        
+        print(
+            f"Training with configuration: obs space={config['observation_space']}, action space={config['action_space']}, std={config['std']}, layers={config['hidden_layers']}, activation={config['activation']}"
+        )
+
         # Train the model multiple times
         for _ in range(num_runs):
             total_rewards = model.efficient_train(num_iterations)
-            run_rewards.append(sum(total_rewards) / len(total_rewards) if total_rewards else 0)
+            run_rewards.append(
+                sum(total_rewards) / len(total_rewards) if total_rewards else 0
+            )
 
         # Calculate statistics across all runs
         average_reward = sum(run_rewards) / num_runs
         max_reward = max(run_rewards)
         min_reward = min(run_rewards)
-        
+
         # Collect results
-        results.append({
-            'configuration': config,
-            'average_reward': average_reward,
-            'max_reward': max_reward,
-            'min_reward': min_reward,
-        })
+        results.append(
+            {
+                "configuration": config,
+                "average_reward": average_reward,
+                "max_reward": max_reward,
+                "min_reward": min_reward,
+            }
+        )
 
         # Clean up the environment
         env.close()
 
     # Sort results by average reward
-    sorted_results = sorted(results, key=lambda x: x['average_reward'], reverse=True)
+    sorted_results = sorted(results, key=lambda x: x["average_reward"], reverse=True)
     return sorted_results
+
 
 def print_results(results):
     print("\nModel Testing Results:\n")
     for result in results:
-        config = result['configuration']
-        print(f"Configuration - Observation Space: {config['observation_space']}, Action Space: {config['action_space']}, "
-              f"Std Dev: {config['std']}, Hidden Layers: {config['hidden_layers']}, Activation: {config['activation']}")
-        print(f"Average Reward: {result['average_reward']:.2f}, Max Reward: {result['max_reward']:.2f}, Min Reward: {result['min_reward']:.2f}\n")
+        config = result["configuration"]
+        print(
+            f"Configuration - Observation Space: {config['observation_space']}, Action Space: {config['action_space']}, "
+            f"Std Dev: {config['std']}, Hidden Layers: {config['hidden_layers']}, Activation: {config['activation']}"
+        )
+        print(
+            f"Average Reward: {result['average_reward']:.2f}, Max Reward: {result['max_reward']:.2f}, Min Reward: {result['min_reward']:.2f}\n"
+        )
+
 
 configurations = [
-{'observation_space': 4, 'action_space': 1, 'std': 0.1, 'hidden_layers': [64, 64], 'activation': 'ReLU'},
-{'observation_space': 4, 'action_space': 1, 'std': 0.2, 'hidden_layers': [64, 64], 'activation': 'ReLU'},
-{'observation_space': 4, 'action_space': 1, 'std': 0.1, 'hidden_layers': [64, 64], 'activation': 'Tanh'},
+    {
+        "observation_space": 4,
+        "action_space": 1,
+        "std": 0.1,
+        "hidden_layers": [64, 64],
+        "activation": "ReLU",
+    },
+    {
+        "observation_space": 4,
+        "action_space": 1,
+        "std": 0.2,
+        "hidden_layers": [64, 64],
+        "activation": "ReLU",
+    },
+    {
+        "observation_space": 4,
+        "action_space": 1,
+        "std": 0.1,
+        "hidden_layers": [64, 64],
+        "activation": "Tanh",
+    },
 ]
 
-print_results(test_models(configurations, num_iterations=10000, num_runs=3))
+# print_results(test_models(configurations, num_iterations=10000, num_runs=3))

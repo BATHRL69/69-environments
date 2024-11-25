@@ -18,7 +18,7 @@ class Agent:
         """Train the agent over a given number of episodes."""
         timesteps = start_timesteps
         episodes = 0
-        
+
         while timesteps < num_timesteps:
             elapsed_timesteps, reward = self.simulate_episode()
             timesteps += elapsed_timesteps
@@ -27,7 +27,9 @@ class Agent:
             self.reward_list.append(reward)
             self.timestep_list.append(timesteps)
 
-            print(f"[Episode {episodes} / timestep {timesteps}] Received reward {reward:.3f}")
+            print(
+                f"[Episode {episodes} / timestep {timesteps}] Received reward {reward:.3f}"
+            )
 
     def predict(self, state):
         """Predict the best action for the current state."""
@@ -42,6 +44,11 @@ class Agent:
         raise NotImplementedError
 
     def render(self, num_timesteps=10_000):
+        """Renders the environment using cv2 for n timesteps, and plots a graph based on reward list stored in model
+
+        Args:
+            num_timesteps (int, optional): Number of timesteps to render for. Defaults to 10_000.
+        """
         state, _info = self.env.reset()
         state = torch.tensor(state, dtype=torch.float32)
         for _ in range(num_timesteps):
@@ -61,7 +68,7 @@ class Agent:
             if is_finished:
                 state, _info = self.env.reset()
                 state = torch.tensor(state, dtype=torch.float32)
-        
+
         plt.figure()
         plt.title("Training Reward Curve")
         plt.xlabel("Timesteps")
