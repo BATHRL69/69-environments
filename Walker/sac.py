@@ -53,10 +53,8 @@ class SACPolicyLoss(nn.Module):
     
 
     def forward(self, min_critic, entropy, alpha):
-        # This way works
+        # gradient ASCENT - negate the loss function in the pseudocode, since our optimiser will perform gradient DESCENT
         return torch.mean(alpha * entropy - min_critic)
-        # This way correct (according to spinning up pseudocode)
-        # return torch.mean(min_critic - alpha * entropy)
 
 
 class SACPolicyNetwork(nn.Module):
@@ -272,14 +270,13 @@ class SACAgent(Agent):
         terminals = torch.tensor(terminals, dtype=torch.float32).unsqueeze(1)
 
         # line 12 of pseudocode
-        with torch.no_grad():
-            actor_prediction_new, log_actor_probability_new = self.actor.sample(new_states)
+        actor_prediction_new, log_actor_probability_new = self.actor.sample(new_states)
 
-            critic_target_1_prediction, critic_target_2_prediction = self.critic_targets.forward(new_states, actor_prediction_new)
-            critic_target_clipped = torch.min(critic_target_1_prediction, critic_target_2_prediction)
+        critic_target_1_prediction, critic_target_2_prediction = self.critic_targets.forward(new_states, actor_prediction_new)
+        critic_target_clipped = torch.min(critic_target_1_prediction, critic_target_2_prediction)
 
-            predicted_target_reward = critic_target_clipped - self.alpha * log_actor_probability_new
-            target = rewards + self.gamma * (1 - terminals) * predicted_target_reward
+        predicted_target_reward = critic_target_clipped - self.alpha * log_actor_probability_new
+        target = rewards + self.gamma * (1 - terminals) * predicted_target_reward
 
         # line 13 of pseudocode
         critic_1_evaluation, critic_2_evaluation = self.critics.forward(old_states, actions)
@@ -334,13 +331,25 @@ class SACAgent(Agent):
                 self.critics_optimiser.load_state_dict(critics_optim_dict)
 
 
-env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
-SAVE_PATH = "sac_pendulum.data"
+env = gym.make("Ant-v4", render_mode="rgb_array")
+SAVE_PATH = "sac_ant.data"
 
 agent = SACAgent(env)
 agent.load(SAVE_PATH)
-agent.train(num_timesteps=10000, start_timesteps=500)
-agent.save(SAVE_PATH)
+# agent.train(num_timesteps=50000, start_timesteps=0)
+# agent.save(SAVE_PATH)
+agent.render()
+
+# env.close()
+
+
+env = gym.make("Humanoid-v4", render_mode="rgb_array")
+SAVE_PATH = "sac_humanoid.data"
+
+agent = SACAgent(env)
+agent.load(SAVE_PATH)
+#agent.train(num_timesteps=150000, start_timesteps=0)
+#agent.save(SAVE_PATH)
 agent.render()
 
 env.close()
