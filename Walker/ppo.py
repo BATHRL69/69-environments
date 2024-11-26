@@ -35,7 +35,7 @@ class PPOPolicyNetwork(nn.Module):
         action_space=8,  # Defaults set from ant walker
         std=0.1,  # Standard deviation for normal distribution
         hidden_layers=[32, 32],
-        activation="ReLU",
+        activation="Tanh",
     ):
         # TODO need to work out what network is going to work best here
         super(PPOPolicyNetwork, self).__init__()
@@ -465,7 +465,7 @@ def verbose_train(environment):
         env,
         observation_space=environment["observation_space"],
         action_space=environment["action_space"],
-        std=0.3,
+        std=0.1,
     )
     model.train(num_iterations=100_000, log_iterations=1000)
     print("\n Training finished")
