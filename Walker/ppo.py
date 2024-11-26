@@ -259,6 +259,9 @@ class PPOAgent(Agent):
             gae = (gae * self.gamma * self.lambda_gae) + deltas[t]
             advantages[t] = gae
 
+        # Account for the terminal state by appending a 0.
+        advantages = torch.cat((advantages, torch.tensor([0.0])), dim=0)
+
         return advantages
 
     def simulate_episode(self):
