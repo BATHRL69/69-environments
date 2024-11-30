@@ -133,6 +133,8 @@ class PPOAgent(Agent):
         lambda_gae=0.95,
         activation="ReLU",
         hidden_layers=[32, 32],
+        batch_size=32,
+        num_trajectories=10,
     ):
         super(PPOAgent, self).__init__(env)
 
@@ -163,6 +165,8 @@ class PPOAgent(Agent):
             100000  # Maximum number of timesteps in a trajectory
         )
         self.lambda_gae = lambda_gae
+        self.batch_size = batch_size
+        self.num_trajectories = num_trajectories
 
     def transfer_policy_net_to_old(self):
         """Copies our current policy into self.old_policy_network"""
@@ -275,26 +279,37 @@ class PPOAgent(Agent):
             torch.tensor(state, dtype=torch.float32)
         )
         trajectories = []
-        timesteps_in_trajectory = 0
-        # Line 3 of pseudocode, here we are collecting a trajectory
-        while (
-            not is_finished
-            and not is_truncated
-            and timesteps_in_trajectory < self.max_trajectory_timesteps
-        ):
-            new_state, reward, is_finished, is_truncated, _ = self.env.step(
-                action.detach().numpy()
-            )
-            trajectories.append(
-                (state, action.detach(), reward, new_state, is_finished, is_truncated)
-            )
-            state = torch.as_tensor(new_state, dtype=torch.float32).flatten()
-            action, _ = self.policy_network.get_action(state)
-            timesteps_in_trajectory += 1
+        timesteps_in_trajectories = 0
+        for _ in range(self.batch_size):
+            trajectory = []
+            # Line 3 of pseudocode, here we are collecting a trajectory
+            while (
+                not is_finished
+                and not is_truncated
+                and timesteps_in_trajectories < self.max_trajectory_timesteps
+            ):
+                new_state, reward, is_finished, is_truncated, _ = self.env.step(
+                    action.detach().numpy()
+                )
+                trajectory.append(
+                    (
+                        state,
+                        action.detach(),
+                        reward,
+                        new_state,
+                        is_finished,
+                        is_truncated,
+                    )
+                )
+                state = torch.as_tensor(new_state, dtype=torch.float32).flatten()
+                action, _ = self.policy_network.get_action(state)
+                timesteps_in_trajectories += 1
 
-        trajectories.append(
-            (state, action, reward, state, is_finished, is_truncated)
-        )  # Append the final trajectory
+            trajectory.append(
+                (state, action, reward, state, is_finished, is_truncated)
+            )  # Append the final trajectory
+            trajectories.extend(trajectory)
+
         ## Get lists of values from our trajectories,
         states = torch.tensor(
             np.array([this_timestep[0] for this_timestep in trajectories]),
@@ -318,7 +333,7 @@ class PPOAgent(Agent):
         advantage_estimates = self.advantage_estimates_mc(states, rewards)
         # Line 6 in Pseudocode
         normalisation_factor = 1 / (
-            timesteps_in_trajectory
+            timesteps_in_trajectories
         )  # 1 / D_k T, which is just timesteps in trajectory for us because we have 1 trajectory
         network_probability_ratio = (
             torch.stack(  # Stack all the values in our list together,into one big list
@@ -354,7 +369,7 @@ class PPOAgent(Agent):
         )  # TODO pseudocode has this as SUM, but it's mean squared error. Need to workout which one works better
         value_loss.backward()
         self.value_optimiser.step()
-        return timesteps_in_trajectory, sum(all_rewards)
+        return timesteps_in_trajectories, sum(all_rewards)
 
     def train(self, num_iterations=100_000, log_iterations=100):
         """Train our agent for "n" timesteps
