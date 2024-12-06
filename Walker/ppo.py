@@ -127,7 +127,7 @@ class PPOAgent(Agent):
         num_epochs=3,
     ):
         super(PPOAgent, self).__init__(env)
-
+        
         # Line 1 of pseudocode
         self.policy_network = PPOPolicyNetwork(observation_space, action_space, std)
         self.old_policy_network = PPOPolicyNetwork(observation_space, action_space, std)
