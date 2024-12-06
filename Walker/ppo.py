@@ -21,6 +21,7 @@ from torch.distributions import Normal
 from ppo_constants import *
 import torch.optim as optim
 import matplotlib.pyplot as plt
+import random
 
 
 class PPOPolicyNetwork(nn.Module):
@@ -130,6 +131,7 @@ class PPOAgent(Agent):
         minibatch_size=4096,
         num_trajectories=100,
         num_epochs=2,
+        entropy_coef=0.01,
     ):
         super(PPOAgent, self).__init__(env)
 
@@ -159,6 +161,7 @@ class PPOAgent(Agent):
         self.minibatch_size = minibatch_size
         self.num_trajectories = num_trajectories
         self.num_epochs = num_epochs
+        self.entropy_coef = entropy_coef
 
     def transfer_policy_net_to_old(self):
         """Copies our current policy into self.old_policy_network"""
