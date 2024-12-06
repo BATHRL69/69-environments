@@ -124,6 +124,7 @@ class PPOAgent(Agent):
         lambda_gae=0.95,
         batch_size=32,
         num_trajectories=10,
+        num_epochs=3,
     ):
         super(PPOAgent, self).__init__(env)
 
@@ -156,6 +157,7 @@ class PPOAgent(Agent):
         self.lambda_gae = lambda_gae
         self.batch_size = batch_size
         self.num_trajectories = num_trajectories
+        self.num_epochs = num_epochs
 
     def transfer_policy_net_to_old(self):
         """Copies our current policy into self.old_policy_network"""
@@ -260,23 +262,19 @@ class PPOAgent(Agent):
     def simulate_episode(self):
         """Simulate a single episode, called by train method on parent class"""
         self.transfer_policy_net_to_old()  # Transfer the current probability network to OLD, so that we are feezing it, before we start making updates
-        all_rewards = []
-        is_finished = False
-        is_truncated = False
-        state, _ = self.env.reset()
-        action, _ = self.policy_network.get_action(
-            torch.tensor(state, dtype=torch.float32)
-        )
+
         trajectories = []
-        timesteps_in_trajectories = 0
-        for _ in range(self.batch_size):
+        total_timesteps = 0
+        for _ in range(self.num_trajectories):
+            is_finished = False
+            is_truncated = False
+            state, _ = self.env.reset()
+            action, _ = self.policy_network.get_action(
+                torch.tensor(state, dtype=torch.float32)
+            )
             trajectory = []
             # Line 3 of pseudocode, here we are collecting a trajectory
-            while (
-                not is_finished
-                and not is_truncated
-                and timesteps_in_trajectories < self.max_trajectory_timesteps
-            ):
+            while not is_finished and not is_truncated:
                 new_state, reward, is_finished, is_truncated, _ = self.env.step(
                     action.detach().numpy()
                 )
@@ -292,7 +290,7 @@ class PPOAgent(Agent):
                 )
                 state = torch.as_tensor(new_state, dtype=torch.float32).flatten()
                 action, _ = self.policy_network.get_action(state)
-                timesteps_in_trajectories += 1
+                total_timesteps += 1
 
             trajectory.append(
                 (state, action, reward, state, is_finished, is_truncated)
@@ -308,7 +306,6 @@ class PPOAgent(Agent):
             np.array([this_timestep[1] for this_timestep in trajectories]),
             dtype=torch.float32,
         )
-        all_rewards.extend([this_timestep[2] for this_timestep in trajectories])
         rewards = torch.tensor(
             np.array([this_timestep[2] for this_timestep in trajectories]),
             dtype=torch.float32,
@@ -320,45 +317,44 @@ class PPOAgent(Agent):
         # Line 5 in Pseudocode
         # Compute advantage estimates
         advantage_estimates = self.advantage_estimates_mc(states, rewards)
-        # Line 6 in Pseudocode
-        normalisation_factor = 1 / (
-            timesteps_in_trajectories
-        )  # 1 / D_k T, which is just timesteps in trajectory for us because we have 1 trajectory
-        network_probability_ratio = (
-            torch.stack(  # Stack all the values in our list together,into one big list
+        for _ in range(self.num_epochs):
+            # Line 6 in Pseudocode
+            normalisation_factor = 1 / (
+                total_timesteps
+            )  # 1 / D_k T, which is just timesteps in trajectory for us because we have 1 trajectory
+            network_probability_ratio = torch.stack(  # Stack all the values in our list together,into one big list
                 [
                     self.probability_ratios(this_state, this_action)
                     for this_state, this_action in zip(states, actions)
                 ]
-            )
-        )  # pi (a_t| s_t) / pi (a_t, s_t) #TODO this isn't working
-        clipped_g = torch.clamp(
-            network_probability_ratio, 1 - self.epsilon, 1 + self.epsilon
-        )  # g(\epsilon, advantage estimates)
-        ratio_with_advantage = advantage_estimates * network_probability_ratio
-        clipped_with_advantage = advantage_estimates * clipped_g
-        ppo_clipped = torch.min(ratio_with_advantage, clipped_with_advantage)
-        policy_loss = -(
-            normalisation_factor
-            * torch.sum(
-                ppo_clipped
-            )  # Take the sum of ppo clipped from pseudocode, loops through every timestep/trajectory
-        )  # We are minusing here because we are trying to find the arg max, so the LOSS needs to be negative. (since we are trying to minimise the loss)
-        self.policy_optimiser.zero_grad()
-        policy_loss.backward()
-        self.policy_optimiser.step()
+            )  # pi (a_t| s_t) / pi (a_t, s_t) #TODO this isn't working
+            clipped_g = torch.clamp(
+                network_probability_ratio, 1 - self.epsilon, 1 + self.epsilon
+            )  # g(\epsilon, advantage estimates)
+            ratio_with_advantage = advantage_estimates * network_probability_ratio
+            clipped_with_advantage = advantage_estimates * clipped_g
+            ppo_clipped = torch.min(ratio_with_advantage, clipped_with_advantage)
+            policy_loss = -(
+                normalisation_factor
+                * torch.sum(
+                    ppo_clipped
+                )  # Take the sum of ppo clipped from pseudocode, loops through every timestep/trajectory
+            )  # We are minusing here because we are trying to find the arg max, so the LOSS needs to be negative. (since we are trying to minimise the loss)
+            self.policy_optimiser.zero_grad()
+            policy_loss.backward()
+            self.policy_optimiser.step()
 
-        # Line 7 in pseudocode
-        value_estimates = torch.tensor(
-            [self.value_network.forward(this_state) for this_state in states],
-            requires_grad=True,
-        )
-        value_loss = normalisation_factor * torch.mean(
-            torch.square(value_estimates - rewards_to_go)
-        )  # TODO pseudocode has this as SUM, but it's mean squared error. Need to workout which one works better
-        value_loss.backward()
-        self.value_optimiser.step()
-        return timesteps_in_trajectories, sum(all_rewards)
+            # Line 7 in pseudocode
+            value_estimates = torch.tensor(
+                [self.value_network.forward(this_state) for this_state in states],
+                requires_grad=True,
+            )
+            value_loss = normalisation_factor * torch.mean(
+                torch.square(value_estimates - rewards_to_go)
+            )
+            value_loss.backward()
+            self.value_optimiser.step()
+        return total_timesteps, torch.sum(rewards)
 
     def train(self, num_iterations=100_000, log_iterations=100):
         """Train our agent for "n" timesteps
@@ -376,7 +372,8 @@ class PPOAgent(Agent):
             timesteps, reward = (
                 self.simulate_episode()
             )  # Taking total reward here because we want to maximise total reward, which is keeping pendulum up
-            total_reward.append(reward)
+            total_reward.append(reward / self.num_trajectories)
+
             if total_timesteps - last_log > log_iterations:
                 average_reward = sum(total_reward) / len(total_reward)
                 print(
@@ -474,7 +471,7 @@ def verbose_train(environment):
     model.train(num_iterations=100_000, log_iterations=1000)
     print("\n Training finished")
     print("Rendering...")
-    model.render(num_timesteps=10_000)
+    model.render(num_timesteps=100_000)
 
 
 environments = [
