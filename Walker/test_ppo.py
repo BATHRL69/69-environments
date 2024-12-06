@@ -1,4 +1,14 @@
-# Modified by ChatGPT to work with minibatches.
+## TODO
+# Learn STD, instead of a set value.
+# Update loop so that we calculate a batch of trajectories, and learn from them, instead of just one.
+# Check that the old model is definetly frozen.
+# Check if there is anything we need to detach in main loop that we're not detaching
+# Hyper param tuning
+# Speed up running
+# Update size of neural network to get best results
+# Try different distributions other than normal | I think normal is best for our environment | Stable baslines uses DiagGaussianDistribution or StateDependentNoiseDistribution, so these could be ones to try, rllib uses normal.
+# Try on ant
+# Add entropy bonus
 
 import gymnasium as gym
 import numpy as np
@@ -76,7 +86,8 @@ class PPOPolicyNetwork(nn.Module):
         log_probs = distribution.log_prob(action)
         return log_probs.sum(
             dim=1
-        )  # Sum over action dimensions if batch processing
+        )  # We can do sum here because they are LOG probs, usually our conditional probability would be x * y.
+        # We are doing exp to turn our log_prob into probability 0-1. Will do torch.exp in probability ratio method to return this to between 0 and 1
 
     def evaluate(self, state, action):
         pass
@@ -122,7 +133,8 @@ class PPOAgent(Agent):
         lambda_gae=0.95,
         activation="ReLU",
         hidden_layers=[32, 32],
-        batch_size=64,  # New parameter for minibatch size
+        batch_size=32,
+        num_trajectories=10,
     ):
         super(PPOAgent, self).__init__(env)
 
@@ -153,7 +165,8 @@ class PPOAgent(Agent):
             100000  # Maximum number of timesteps in a trajectory
         )
         self.lambda_gae = lambda_gae
-        self.batch_size = batch_size  # Minibatch size
+        self.batch_size = batch_size
+        self.num_trajectories = num_trajectories
 
     def transfer_policy_net_to_old(self):
         """Copies our current policy into self.old_policy_network"""
@@ -221,7 +234,9 @@ class PPOAgent(Agent):
         Returns:
             torch.Tensor: The advantage estimate for each step in trajectory.
         """
-        state_value_estimates = self.value_network(states).squeeze()  # V(S)
+        state_value_estimates = torch.tensor(
+            [self.value_network.forward(state) for state in states]
+        )  # V(S)
         state_action_value_estimates = self.state_action_values_mc(rewards)  # Q(S,A)
         return state_action_value_estimates - state_value_estimates  # Q(S,A) - V(S)
 
@@ -230,9 +245,12 @@ class PPOAgent(Agent):
         Use advantage estimation on value network, using GAE
         """
         # TODO on ant V4, this returns a tensor of size length_of_trajectory - 1, which causes dimensions mismatches. I think we need to explicitly handle the terminal state, but not sure on this
-        values = self.value_network(states[:-1]).squeeze()
-
-        next_values = self.value_network(states[1:]).squeeze()
+        values = torch.tensor(
+            [self.value_network.forward(state) for state in states[:-1]]
+        )
+        next_values = torch.tensor(
+            [self.value_network.forward(state) for state in states[1:]]
+        )
 
         rewards = rewards[:-1]
 
@@ -249,78 +267,72 @@ class PPOAgent(Agent):
 
         return advantages
 
-    def collect_trajectories(self, num_trajectories):
-        """Collect multiple trajectories for minibatch training."""
-        trajectories = []
-        total_rewards = []
-        total_timesteps = 0
+    def simulate_episode(self):
+        """Simulate a single episode, called by train method on parent class"""
+        self.transfer_policy_net_to_old()  # Transfer the current probability network to OLD, so that we are feezing it, before we start making updates
 
-        for _ in range(num_trajectories):
+        trajectories = []
+        total_timesteps = 0
+        for _ in range(self.num_trajectories):
             is_finished = False
             is_truncated = False
             state, _ = self.env.reset()
-            state = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
+            action, _ = self.policy_network.get_action(
+                torch.tensor(state, dtype=torch.float32)
+            )
             trajectory = []
-            timesteps_in_trajectory = 0
-            episode_rewards = 0
-
-            while (
-                not is_finished
-                and not is_truncated
-                and timesteps_in_trajectory < self.max_trajectory_timesteps
-            ):
-                action, _ = self.policy_network.get_action(state)
-                action_np = action.detach().numpy()[0]
+            # Line 3 of pseudocode, here we are collecting a trajectory
+            while not is_finished and not is_truncated:
                 new_state, reward, is_finished, is_truncated, _ = self.env.step(
-                    action_np
+                    action.detach().numpy()
                 )
-                new_state = torch.tensor(new_state, dtype=torch.float32).unsqueeze(0)
                 trajectory.append(
                     (
-                        state.squeeze(0),
-                        action.squeeze(0).detach(),
+                        state,
+                        action.detach(),
                         reward,
-                        new_state.squeeze(0),
+                        new_state,
                         is_finished,
                         is_truncated,
                     )
                 )
-                state = new_state
-                timesteps_in_trajectory += 1
-                episode_rewards += reward
+                state = torch.as_tensor(new_state, dtype=torch.float32).flatten()
+                action, _ = self.policy_network.get_action(state)
+                total_timesteps += 1
 
-            total_timesteps += timesteps_in_trajectory
-            total_rewards.append(episode_rewards)
+            trajectory.append(
+                (state, action, reward, state, is_finished, is_truncated)
+            )  # Append the final trajectory
             trajectories.extend(trajectory)
 
-        return trajectories, total_timesteps, total_rewards
-
-    def simulate_episode(self, num_trajectories=10):
-        """Simulate multiple episodes and collect trajectories."""
-        self.transfer_policy_net_to_old()  # Transfer the current probability network to OLD, so that we are freezing it, before we start making updates
-
-        # Collect multiple trajectories
-        trajectories, timesteps_in_trajectory, total_rewards = self.collect_trajectories(
-            num_trajectories
+        ## Get lists of values from our trajectories,
+        states = torch.tensor(
+            np.array([this_timestep[0] for this_timestep in trajectories]),
+            dtype=torch.float32,
+        )
+        actions = torch.tensor(
+            np.array([this_timestep[1] for this_timestep in trajectories]),
+            dtype=torch.float32,
+        )
+        all_rewards = [this_timestep[2] for this_timestep in trajectories]
+        rewards = torch.tensor(
+            np.array([this_timestep[2] for this_timestep in trajectories]),
+            dtype=torch.float32,
         )
 
-        # Prepare tensors
-        states = torch.stack([t[0] for t in trajectories])
-        actions = torch.stack([t[1] for t in trajectories])
-        rewards = torch.tensor([t[2] for t in trajectories], dtype=torch.float32)
-
-        # Compute rewards to go
+        # Line 4 in pseudocode
+        # Compute rewards to go TODO is this the right way to work these out using MC?
         rewards_to_go = self.state_action_values_mc(rewards)
-        rewards_to_go = rewards_to_go.unsqueeze(1)  # For value network training
-
+        # Line 5 in Pseudocode
+        # rewards_to_go = rewards_to_go.unsqueeze(1)  # For value network training
         # Compute advantage estimates
         advantage_estimates = self.advantage_estimates_mc(states, rewards)
-        advantage_estimates = advantage_estimates.detach()
+        # advantage_estimates = advantage_estimates.detach()
 
-        # Normalize advantages
-        advantage_estimates = (advantage_estimates - advantage_estimates.mean()) / (
-            advantage_estimates.std() + 1e-8
-        )
+        # # Normalize advantages
+        # advantage_estimates = (advantage_estimates - advantage_estimates.mean()) / (
+        #     advantage_estimates.std() + 1e-8
+        # )
 
         # Line 6 in Pseudocode
         num_samples = states.size(0)
@@ -361,20 +373,26 @@ class PPOAgent(Agent):
             value_loss.backward()
             self.value_optimiser.step()
 
-        return timesteps_in_trajectory, sum(total_rewards)
+        return total_timesteps, sum(all_rewards)
 
-    def train(self, num_iterations=100_000, log_iterations=100, num_trajectories=20):
+    def train(self, num_iterations=100_000, log_iterations=100):
+        """Train our agent for "n" timesteps
+
+        Args:
+            num_iterations (int, optional): The number of timesteps to run until. Defaults to 100_000.
+            log_iterations (int, optional): Logs after every n timesteps. Defaults to 100.
+        """
         total_timesteps = 0
         total_reward = []
         average_rewards = []
         last_log = 0
         while total_timesteps < num_iterations:
 
-            timesteps, reward = self.simulate_episode(
-                num_trajectories
-            )  # Collect and train on multiple trajectories
-            average_episode_reward = reward / num_trajectories
-            total_reward.append(average_episode_reward)
+            timesteps, reward = (
+                self.simulate_episode()
+            )  # Taking total reward here because we want to maximise total reward, which is keeping pendulum up
+            total_reward.append(reward / self.num_trajectories)
+
             if total_timesteps - last_log > log_iterations:
                 average_reward = sum(total_reward) / len(total_reward)
                 print(
@@ -388,13 +406,11 @@ class PPOAgent(Agent):
             total_timesteps += timesteps
         self.plot(average_rewards)
 
-
-    def efficient_train(self, num_iterations=1000, num_trajectories=10):
+    def efficient_train(self, num_iterations=1000):
         """Train our model for n iterations, without logging or plotting
 
         Args:
             num_iterations (int, optional): number of timesteps to run until. Defaults to 1000.
-            num_trajectories (int, optional): Number of trajectories per update. Defaults to 10.
 
         Returns:
             array: Total rewards, for each training iteration
@@ -403,16 +419,16 @@ class PPOAgent(Agent):
         total_rewards = []
 
         while total_timesteps < num_iterations:
-            timesteps, reward = self.simulate_episode(
-                num_trajectories
-            )  # Simulate episodes and collect rewards
+            timesteps, reward = (
+                self.simulate_episode()
+            )  # Simulate an episode and collect rewards
             total_rewards.append(reward)
             total_timesteps += timesteps
 
         return total_rewards
 
     def plot(self, average_rewards):
-        """Plot the average rewards over time
+        """Plot the average rewards other time
 
         Args:
             average_rewards (array): The average reward for each logging timestep
@@ -471,10 +487,10 @@ def verbose_train(environment):
         action_space=environment["action_space"],
         std=0.1,
     )
-    model.train(num_iterations=100_000, log_iterations=1000, num_trajectories=10)
+    model.train(num_iterations=100_000, log_iterations=1000)
     print("\n Training finished")
     print("Rendering...")
-    model.render(num_timesteps=100_000)
+    model.render(num_timesteps=10_000)
 
 
 environments = [
@@ -482,7 +498,7 @@ environments = [
     {"name": "Ant-v4", "observation_space": 27, "action_space": 8},
     {"name": "Ant-v5", "observation_space": 105, "action_space": 8},
 ]
-verbose_train(environments[0])
+verbose_train(environments[1])
 
 
 ##################
