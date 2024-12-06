@@ -49,7 +49,6 @@ class PPOPolicyNetwork(nn.Module):
         self.std = std
         self.log_std = nn.Parameter(torch.full((action_space,), np.log(std)))
 
-
     def _get_distribution(self, state):
         action_values = self.network(state)
         std = torch.exp(self.log_std)
@@ -64,7 +63,7 @@ class PPOPolicyNetwork(nn.Module):
         Returns:
             torch.tensor: action, probability
         """
-        #action_values = self.network(state)
+        # action_values = self.network(state)
         distribution = self._get_distribution(state)
         action = distribution.sample()
         probability = distribution.log_prob(action).sum(dim=-1)
@@ -80,10 +79,10 @@ class PPOPolicyNetwork(nn.Module):
         Returns:
             torch.Tensor: the log-probability of action given state
         """
-        #action_values = self.network(state)
+        # action_values = self.network(state)
         distribution = self._get_distribution(state)
         log_probs = distribution.log_prob(action).sum(dim=-1)
-         
+
         return log_probs  # We can do sum here because they are LOG probs, usually our conditional probability would be x * y.
         # We are doing exp to turn our log_prob into probability 0-1. Will do torch.exp in probability ratio method to return this to between 0 and 1
 
@@ -123,19 +122,19 @@ class PPOAgent(Agent):
         env,
         epsilon=0.2,
         gamma=0.99,
-        observation_space=27,  # Default from ant-v4
+        observation_space=115,  # Default from ant-v4
         action_space=8,
         std=0.1,
         learning_rate=3e-4,
         weight_decay=0,
         lambda_gae=0.95,
-        minibatch_size=256,
-        num_trajectories=10,
-        num_epochs=3,
+        minibatch_size=4096,
+        num_trajectories=100,
+        num_epochs=2,
         entropy_coef=0.01,
     ):
         super(PPOAgent, self).__init__(env)
-        
+
         # Line 1 of pseudocode
         self.policy_network = PPOPolicyNetwork(observation_space, action_space, std)
         self.old_policy_network = PPOPolicyNetwork(observation_space, action_space, std)
@@ -490,8 +489,26 @@ def verbose_train(environment):
     Args:
         environment (array): The environment to train model on, should include name, observation_space, and action_space
     """
-    env = gym.make(environment["name"], render_mode="rgb_array")
 
+    if environment["name"] == "Unitreee":
+        env = gym.make(
+            "Ant-v5",
+            xml_file=r"C:\Users\Solly\_\python\69\Walker\Testing_functions\mujoco_menagerie/unitree_go1/scene.xml",
+            forward_reward_weight=1,
+            ctrl_cost_weight=0.05,
+            contact_cost_weight=5e-4,
+            healthy_reward=1,
+            main_body=1,
+            healthy_z_range=(0.195, 0.75),
+            include_cfrc_ext_in_observation=True,
+            exclude_current_positions_from_observation=False,
+            reset_noise_scale=0.1,
+            frame_skip=25,
+            max_episode_steps=1000,
+            render_mode="rgb_array",
+        )
+    else:
+        env = gym.make(environment["name"], render_mode="rgb_array")
     model = PPOAgent(
         env,
         observation_space=environment["observation_space"],
@@ -508,5 +525,6 @@ environments = [
     {"name": "InvertedPendulum-v4", "observation_space": 4, "action_space": 1},
     {"name": "Ant-v4", "observation_space": 27, "action_space": 8},
     {"name": "Ant-v5", "observation_space": 105, "action_space": 8},
+    {"name": "Unitreee", "observation_space": 115, "action_space": 12},
 ]
-verbose_train(environments[1])
+verbose_train(environments[3])
