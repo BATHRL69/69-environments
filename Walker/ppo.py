@@ -21,6 +21,7 @@ from torch.distributions import Normal
 from ppo_constants import *
 import torch.optim as optim
 import matplotlib.pyplot as plt
+import random
 
 
 class PPOPolicyNetwork(nn.Module):
@@ -131,6 +132,7 @@ class PPOAgent(Agent):
         batch_size=32,
         num_trajectories=10,
         num_epochs=3,
+        entropy_coef=0.01,
     ):
         super(PPOAgent, self).__init__(env)
 
@@ -164,6 +166,7 @@ class PPOAgent(Agent):
         self.batch_size = batch_size
         self.num_trajectories = num_trajectories
         self.num_epochs = num_epochs
+        self.entropy_coef = entropy_coef
 
     def transfer_policy_net_to_old(self):
         """Copies our current policy into self.old_policy_network"""
@@ -346,6 +349,13 @@ class PPOAgent(Agent):
                     ppo_clipped
                 )  # Take the sum of ppo clipped from pseudocode, loops through every timestep/trajectory
             )  # We are minusing here because we are trying to find the arg max, so the LOSS needs to be negative. (since we are trying to minimise the loss)
+            
+            # Entropy bonus
+            dist = self.policy_network._get_distribution(states)
+            entropy = dist.entropy().mean()
+            
+            policy_loss = policy_loss - self.entropy_coef * entropy
+            
             self.policy_optimiser.zero_grad()
             policy_loss.backward()
             self.policy_optimiser.step()
@@ -469,6 +479,7 @@ def verbose_train(environment):
         environment (array): The environment to train model on, should include name, observation_space, and action_space
     """
     env = gym.make(environment["name"], render_mode="rgb_array")
+
     model = PPOAgent(
         env,
         observation_space=environment["observation_space"],
