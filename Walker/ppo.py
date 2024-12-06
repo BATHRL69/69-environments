@@ -46,6 +46,13 @@ class PPOPolicyNetwork(nn.Module):
             nn.Linear(32, action_space),
         )
         self.std = std
+        self.log_std = nn.Parameter(torch.full((action_space,), np.log(std)))
+
+
+    def _get_distribution(self, state):
+        action_values = self.network(state)
+        std = torch.exp(self.log_std)
+        return Normal(action_values, std)
 
     def get_action(self, state):
         """Given a state, gets an action, sampled from normal distribution
@@ -56,10 +63,10 @@ class PPOPolicyNetwork(nn.Module):
         Returns:
             torch.tensor: action, probability
         """
-        action_values = self.network(state)
-        distribution = Normal(action_values, self.std)
+        #action_values = self.network(state)
+        distribution = self._get_distribution(state)
         action = distribution.sample()
-        probability = distribution.log_prob(action)
+        probability = distribution.log_prob(action).sum(dim=-1)
         return action, probability
 
     def get_probability_given_action(self, state, action):
@@ -72,12 +79,11 @@ class PPOPolicyNetwork(nn.Module):
         Returns:
             torch.Tensor: the log-probability of action given state
         """
-        action_values = self.network(state)
-        distribution = Normal(action_values, self.std)
-        log_probs = distribution.log_prob(action)
-        return log_probs.sum(
-            dim=0
-        )  # We can do sum here because they are LOG probs, usually our conditional probability would be x * y.
+        #action_values = self.network(state)
+        distribution = self._get_distribution(state)
+        log_probs = distribution.log_prob(action).sum(dim=-1)
+         
+        return log_probs  # We can do sum here because they are LOG probs, usually our conditional probability would be x * y.
         # We are doing exp to turn our log_prob into probability 0-1. Will do torch.exp in probability ratio method to return this to between 0 and 1
 
     def evaluate(self, state, action):
@@ -381,6 +387,7 @@ class PPOAgent(Agent):
                     end="",
                     flush=True,
                 )
+
                 average_rewards.append(average_reward)
                 total_reward = []
                 last_log = total_timesteps
