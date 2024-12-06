@@ -48,7 +48,6 @@ class PPOPolicyNetwork(nn.Module):
         self.std = std
         self.log_std = nn.Parameter(torch.full((action_space,), np.log(std)))
 
-
     def _get_distribution(self, state):
         action_values = self.network(state)
         std = torch.exp(self.log_std)
@@ -63,7 +62,7 @@ class PPOPolicyNetwork(nn.Module):
         Returns:
             torch.tensor: action, probability
         """
-        #action_values = self.network(state)
+        # action_values = self.network(state)
         distribution = self._get_distribution(state)
         action = distribution.sample()
         probability = distribution.log_prob(action).sum(dim=-1)
@@ -79,10 +78,10 @@ class PPOPolicyNetwork(nn.Module):
         Returns:
             torch.Tensor: the log-probability of action given state
         """
-        #action_values = self.network(state)
+        # action_values = self.network(state)
         distribution = self._get_distribution(state)
         log_probs = distribution.log_prob(action).sum(dim=-1)
-         
+
         return log_probs  # We can do sum here because they are LOG probs, usually our conditional probability would be x * y.
         # We are doing exp to turn our log_prob into probability 0-1. Will do torch.exp in probability ratio method to return this to between 0 and 1
 
@@ -128,12 +127,12 @@ class PPOAgent(Agent):
         learning_rate=3e-4,
         weight_decay=0,
         lambda_gae=0.95,
-        minibatch_size=256,
-        num_trajectories=10,
-        num_epochs=3,
+        minibatch_size=4096,
+        num_trajectories=100,
+        num_epochs=2,
     ):
         super(PPOAgent, self).__init__(env)
-        
+
         # Line 1 of pseudocode
         self.policy_network = PPOPolicyNetwork(observation_space, action_space, std)
         self.old_policy_network = PPOPolicyNetwork(observation_space, action_space, std)
