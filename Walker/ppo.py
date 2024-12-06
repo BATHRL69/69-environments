@@ -34,26 +34,17 @@ class PPOPolicyNetwork(nn.Module):
         observation_space=27,  # Defaults set from ant walker
         action_space=8,  # Defaults set from ant walker
         std=0.1,  # Standard deviation for normal distribution
-        hidden_layers=[32, 32],
-        activation="Tanh",
     ):
         # TODO need to work out what network is going to work best here
         super(PPOPolicyNetwork, self).__init__()
 
-        layers = []
-        input_size = observation_space
-
-        for layer_dimension in hidden_layers:
-            layers.append(nn.Linear(input_size, layer_dimension))
-            if activation == "ReLU":
-                layers.append(nn.ReLU())
-
-            elif activation == "Tanh":
-                layers.append(nn.Tanh())
-            input_size = layer_dimension
-
-        layers.append(nn.Linear(hidden_layers[-1], action_space))
-        self.network = nn.Sequential(*layers)
+        self.network = nn.Sequential(
+            nn.Linear(observation_space, 32),
+            nn.ReLU(),
+            nn.Linear(32, 32),
+            nn.ReLU(),
+            nn.Linear(32, action_space),
+        )
         self.std = std
 
     def get_action(self, state):
@@ -131,8 +122,6 @@ class PPOAgent(Agent):
         learning_rate=3e-4,
         weight_decay=0,
         lambda_gae=0.95,
-        activation="ReLU",
-        hidden_layers=[32, 32],
         batch_size=32,
         num_trajectories=10,
         num_epochs=3,
@@ -141,10 +130,10 @@ class PPOAgent(Agent):
 
         # Line 1 of pseudocode
         self.policy_network = PPOPolicyNetwork(
-            observation_space, action_space, std, hidden_layers, activation
+            observation_space, action_space, std
         )
         self.old_policy_network = PPOPolicyNetwork(
-            observation_space, action_space, std, hidden_layers, activation
+            observation_space, action_space, std
         )
         self.transfer_policy_net_to_old()
         self.policy_optimiser = optim.Adam(
@@ -242,32 +231,33 @@ class PPOAgent(Agent):
         state_action_value_estimates = self.state_action_values_mc(rewards)  # Q(S,A)
         return state_action_value_estimates - state_value_estimates  # Q(S,A) - V(S)
 
-    def advantage_estimates_gae(self, states, rewards):
-        """
-        Use advantage estimation on value network, using GAE
-        """
-        # TODO on ant V4, this returns a tensor of size length_of_trajectory - 1, which causes dimensions mismatches. I think we need to explicitly handle the terminal state, but not sure on this
-        values = torch.tensor(
-            [self.value_network.forward(state) for state in states[:-1]]
-        )
-        next_values = torch.tensor(
-            [self.value_network.forward(state) for state in states[1:]]
-        )
+    # def advantage_estimates_gae(self, states, rewards):
+    #     """
+    #     Use advantage estimation on value network, using GAE
+    #     """
+    #     # TODO on ant V4, this returns a tensor of size length_of_trajectory - 1, which causees dimensions mismatches. I think we need to explicitly handle the terminal state, but not sure on this
+    #     values = torch.tensor(
+    #         [self.value_network.forward(state) for state in states[:-1]]
+    #     )
 
-        rewards = rewards[:-1]
+    #     next_values = torch.tensor(
+    #         [self.value_network.forward(state) for state in states[1:]]
+    #     )
 
-        deltas = rewards + self.gamma * next_values - values
-        advantages = torch.zeros_like(rewards)
+    #     rewards = rewards[:-1]
 
-        gae = 0
-        for t in reversed(range(len(deltas))):
-            gae = (gae * self.gamma * self.lambda_gae) + deltas[t]
-            advantages[t] = gae
+    #     deltas = rewards + self.gamma * next_values - values
+    #     advantages = torch.zeros_like(rewards)
 
-        # Account for the terminal state by appending a 0.
-        advantages = torch.cat((advantages, torch.tensor([0.0])), dim=0)
+    #     gae = 0
+    #     for t in reversed(range(len(deltas))):
+    #         gae = (gae * self.gamma * self.lambda_gae) + deltas[t]
+    #         advantages[t] = gae
 
-        return advantages
+    #     # Account for the terminal state by appending a 0.
+    #     advantages = torch.cat((advantages, torch.tensor([0.0])), dim=0)
+
+    #     return advantages
 
     def simulate_episode(self):
         """Simulate a single episode, called by train method on parent class"""
@@ -490,96 +480,3 @@ environments = [
     {"name": "Ant-v5", "observation_space": 105, "action_space": 8},
 ]
 verbose_train(environments[1])
-
-
-##################
-# Testing the models
-def test_models(configurations, num_iterations=50000, num_runs=3):
-    results = []
-    for config in configurations:
-        # Create the environment
-        env = gym.make("InvertedPendulum-v4", render_mode="rgb_array")
-
-        # Initialize the model with the given configuration
-        model = PPOAgent(
-            env,
-            observation_space=config["observation_space"],
-            action_space=config["action_space"],
-            std=config["std"],
-            hidden_layers=config["hidden_layers"],
-            activation=config["activation"],
-        )
-
-        run_rewards = []
-        print(
-            f"Training with configuration: obs space={config['observation_space']}, action space={config['action_space']}, std={config['std']}, layers={config['hidden_layers']}, activation={config['activation']}"
-        )
-
-        # Train the model multiple times
-        for _ in range(num_runs):
-            total_rewards = model.efficient_train(num_iterations)
-            run_rewards.append(
-                sum(total_rewards) / len(total_rewards) if total_rewards else 0
-            )
-
-        # Calculate statistics across all runs
-        average_reward = sum(run_rewards) / num_runs
-        max_reward = max(run_rewards)
-        min_reward = min(run_rewards)
-
-        # Collect results
-        results.append(
-            {
-                "configuration": config,
-                "average_reward": average_reward,
-                "max_reward": max_reward,
-                "min_reward": min_reward,
-            }
-        )
-
-        # Clean up the environment
-        env.close()
-
-    # Sort results by average reward
-    sorted_results = sorted(results, key=lambda x: x["average_reward"], reverse=True)
-    return sorted_results
-
-
-def print_results(results):
-    print("\nModel Testing Results:\n")
-    for result in results:
-        config = result["configuration"]
-        print(
-            f"Configuration - Observation Space: {config['observation_space']}, Action Space: {config['action_space']}, "
-            f"Std Dev: {config['std']}, Hidden Layers: {config['hidden_layers']}, Activation: {config['activation']}"
-        )
-        print(
-            f"Average Reward: {result['average_reward']:.2f}, Max Reward: {result['max_reward']:.2f}, Min Reward: {result['min_reward']:.2f}\n"
-        )
-
-
-configurations = [
-    {
-        "observation_space": 4,
-        "action_space": 1,
-        "std": 0.1,
-        "hidden_layers": [64, 64],
-        "activation": "ReLU",
-    },
-    {
-        "observation_space": 4,
-        "action_space": 1,
-        "std": 0.2,
-        "hidden_layers": [64, 64],
-        "activation": "ReLU",
-    },
-    {
-        "observation_space": 4,
-        "action_space": 1,
-        "std": 0.1,
-        "hidden_layers": [64, 64],
-        "activation": "Tanh",
-    },
-]
-
-# print_results(test_models(configurations, num_iterations=10000, num_runs=3))
