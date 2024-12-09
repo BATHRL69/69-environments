@@ -1,13 +1,10 @@
 ## TODO
-# Learn STD, instead of a set value.
-# Update loop so that we calculate a batch of trajectories, and learn from them, instead of just one.
 # Check that the old model is definetly frozen.
 # Check if there is anything we need to detach in main loop that we're not detaching
 # Hyper param tuning
 # Speed up running
 # Update size of neural network to get best results
 # Try different distributions other than normal | I think normal is best for our environment | Stable baslines uses DiagGaussianDistribution or StateDependentNoiseDistribution, so these could be ones to try, rllib uses normal.
-# Try on ant
 # Add entropy bonus
 
 import gymnasium as gym
