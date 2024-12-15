@@ -178,7 +178,7 @@ class SACAgent(Agent):
 
         self.replay_buffer = ReplayBuffer(1000000, observation_space_shape, action_space_shape)
         
-        self.actor = SACPolicyNetwork(input_dim=observation_space_shape, action_dim=action_space_shape,action_max=action_space_max_value)
+        self.actor = SACPolicyNetwork(input_dim=observation_space_shape, action_dim=action_space_shape, action_max=action_space_max_value)
         self.critics = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
         self.critic_targets = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
 
@@ -305,7 +305,7 @@ class SACAgent(Agent):
 
 
     def predict(self, state):
-        return self.actor.sample(state.unsqueeze(0))[0].detach().numpy()[0]
+        return self.actor.forward(state.unsqueeze(0))[0].detach().numpy()[0]
     
 
     def save(self, path):
@@ -336,20 +336,20 @@ SAVE_PATH = "sac_ant.data"
 
 agent = SACAgent(env)
 agent.load(SAVE_PATH)
-# agent.train(num_timesteps=50000, start_timesteps=0)
-# agent.save(SAVE_PATH)
-agent.render()
-
-# env.close()
-
-
-env = gym.make("Humanoid-v4", render_mode="rgb_array")
-SAVE_PATH = "sac_humanoid.data"
-
-agent = SACAgent(env)
-agent.load(SAVE_PATH)
-#agent.train(num_timesteps=150000, start_timesteps=0)
-#agent.save(SAVE_PATH)
+agent.train(num_timesteps=50000, start_timesteps=0)
+agent.save(SAVE_PATH)
 agent.render()
 
 env.close()
+
+
+# env = gym.make("Humanoid-v4", render_mode="rgb_array")
+# SAVE_PATH = "sac_humanoid.data"
+
+# agent = SACAgent(env)
+# agent.load(SAVE_PATH)
+# agent.train(num_timesteps=100000, start_timesteps=0)
+# agent.save(SAVE_PATH)
+# agent.render()
+
+# env.close()
