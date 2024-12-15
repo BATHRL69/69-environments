@@ -180,7 +180,7 @@ class NStepSarsaAgent(Agent):
   def predict(self, state):
     state = self.get_discrete_state(state)
     action = self.choose_action(state, epsilon_override=0)
-    return torch.tensor(self.get_continuous_action(action))
+    return self.get_continuous_action(action)
 
   
   def save(self, path):

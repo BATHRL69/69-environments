@@ -156,7 +156,7 @@ class SACValueNetwork(nn.Module):
 
 ## WORKING AGENT
 class SACAgent(Agent):
-    def __init__(self, env: gym.Env, update_threshold: int=1, batch_size: int=256, lr: float=3e-4, gamma: float=0.99, polyak=0.995, alpha:float=0.2):
+    def __init__(self, env: gym.Env, update_threshold: int=1, batch_size: int=256, lr: float=3e-4, gamma: float=0.99, polyak=0.995, fixed_alpha=None):
         super(SACAgent, self).__init__(env)
 
         # line 1 of pseudocode
@@ -167,7 +167,7 @@ class SACAgent(Agent):
 
         # model hyperparams
         self.batch_size = batch_size
-        self.alpha = alpha
+        self.fixed_alpha = fixed_alpha
         self.lr = lr
         self.gamma = gamma
         self.polyak = polyak
@@ -186,8 +186,12 @@ class SACAgent(Agent):
         self.critic_1_loss = nn.MSELoss()
         self.critic_2_loss = nn.MSELoss()
 
-        self.actor_optimiser = optim.Adam(self.actor.parameters(),lr=self.lr)
-        self.critics_optimiser = optim.Adam(self.critics.parameters(),lr=self.lr)
+        self.target_entropy = -action_space_shape
+        self.log_alpha = torch.tensor(0.0, requires_grad=True)
+
+        self.actor_optimiser = optim.Adam(self.actor.parameters(), lr=self.lr)
+        self.critics_optimiser = optim.Adam(self.critics.parameters(), lr=self.lr)
+        self.alpha_optimiser = optim.Adam([self.log_alpha], lr=self.lr)
 
         # line 2 of pseudocode
         self.polyak_update(0)
@@ -275,7 +279,11 @@ class SACAgent(Agent):
         critic_target_1_prediction, critic_target_2_prediction = self.critic_targets.forward(new_states, actor_prediction_new)
         critic_target_clipped = torch.min(critic_target_1_prediction, critic_target_2_prediction)
 
-        predicted_target_reward = critic_target_clipped - self.alpha * log_actor_probability_new
+        alpha = self.log_alpha.exp() if self.fixed_alpha is None else self.fixed_alpha
+
+        print(alpha)
+
+        predicted_target_reward = critic_target_clipped - alpha * log_actor_probability_new
         target = rewards + self.gamma * (1 - terminals) * predicted_target_reward
 
         # line 13 of pseudocode
@@ -286,7 +294,7 @@ class SACAgent(Agent):
         total_critic_loss = critic_1_loss + critic_2_loss
 
         self.critics_optimiser.zero_grad()
-        total_critic_loss.backward()
+        total_critic_loss.backward(retain_graph=True)
         self.critics_optimiser.step()
 
         # line 14 of pseudocode
@@ -295,17 +303,26 @@ class SACAgent(Agent):
         critic_1_prediction, critic_2_prediction = self.critics.forward(old_states, actor_prediction_old)
         critic_clipped = torch.min(critic_1_prediction, critic_2_prediction)
 
-        actor_loss = self.actor_loss(critic_clipped, log_actor_probability_old, self.alpha)
+        actor_loss = self.actor_loss(critic_clipped, log_actor_probability_old, alpha)
 
         self.actor_optimiser.zero_grad()
         actor_loss.backward()
         self.actor_optimiser.step()
 
+        # temperature tuning
+        alpha_loss = -(self.log_alpha * (log_actor_probability_old + self.target_entropy).detach()).mean()
+
+        self.alpha_optimiser.zero_grad()
+        alpha_loss.backward()
+        self.alpha_optimiser.step()
+
         self.polyak_update(self.polyak)
 
 
     def predict(self, state):
-        return self.actor.forward(state.unsqueeze(0))[0].detach().numpy()[0]
+        with torch.no_grad():
+            action = self.actor.forward(state.unsqueeze(0))
+        return action[0].detach().numpy()[0]
     
 
     def save(self, path):
@@ -336,7 +353,7 @@ SAVE_PATH = "sac_ant.data"
 
 agent = SACAgent(env)
 agent.load(SAVE_PATH)
-agent.train(num_timesteps=50000, start_timesteps=0)
+agent.train(num_timesteps=200000, start_timesteps=1000)
 agent.save(SAVE_PATH)
 agent.render()
 
