@@ -453,7 +453,7 @@ class PPOAgent(Agent):
         """
         with torch.no_grad():
             action = self.policy_network.forward(state)
-        return action
+        return action.detach().numpy()
 
     def save(self, path):
         """Pickle save our policy and value_networks
