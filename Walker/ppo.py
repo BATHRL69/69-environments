@@ -182,14 +182,6 @@ class PPOAgent(Agent):
             current_log_prob - old_log_prob
         )  # This formula is P(A|S) / P_old(A|S) but we can do - since they are log probability
 
-    def entropy_bonus(self):
-        """
-        Can add an entropy bonus to the above to encourage exploration, since this is an on-policy method
-        Args:
-
-        Returns:
-        """
-
     def state_action_values_mc(self, rewards):
         """Compute Q value, this is the value of taking a state, and action, and then following the policy thereafter
         Args:
@@ -477,6 +469,123 @@ class PPOAgent(Agent):
                 self.value_network = pickle.load(file)
 
 
+class DPOAgent(PPOAgent):
+    def __init__(
+        self,
+        env,
+        epsilon=0.3,
+        gamma=0.99,
+        observation_space=115,  # Default from ant-v4
+        action_space=8,
+        std=0.1,
+        learning_rate=3e-4,
+        weight_decay=0,
+        lambda_gae=0.95,
+        minibatch_size=4096,
+        num_trajectories=10,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
+        num_epochs=2,
+        entropy_coef=0.01,
+        alpha=2,
+        beta=0.6,
+    ):
+        super().__init__(
+            env,
+            epsilon,
+            gamma,
+            observation_space,
+            action_space,
+            std,
+            learning_rate,
+            weight_decay,
+            lambda_gae,
+            minibatch_size,
+            num_trajectories,
+            num_epochs,
+            entropy_coef,
+        )
+        self.alpha = alpha
+        self.beta = beta
+
+    def calculate_drift(self, network_probability_ratio, advantage_estimates):
+        """
+        Drift function (calculating advantage, weighted by how different this is to current policy) from DPO.
+        Args:
+            network_probability_ratio (torch.Tensor): probabi ratio
+            advantage_estimates (torch.Tensor): advantage estimate
+        Returns:
+            torch.Tensor: Drift value
+        """
+        drift = torch.zeros_like(advantage_estimates)
+        for count, this_estimate in enumerate(
+            advantage_estimates
+        ):  # Take either the positive or negative drift value
+            this_network_probability_ratio = network_probability_ratio[count]
+            this_advantage_estimate = advantage_estimates[count]
+            if this_estimate > 0:
+                drift[count] = torch.nn.functional.relu(
+                    (this_network_probability_ratio - 1) * this_advantage_estimate
+                    - self.alpha
+                    * torch.tanh(
+                        ((this_network_probability_ratio - 1) * this_advantage_estimate)
+                        / self.alpha
+                    )
+                )
+            else:  # Advantage estimate is negative
+                drift[count] = torch.nn.functional.relu(
+                    torch.log(this_network_probability_ratio) * this_advantage_estimate
+                    - self.beta
+                    * torch.tanh(
+                        (
+                            torch.log(this_network_probability_ratio)
+                            * this_advantage_estimate
+                        )
+                        / self.beta
+                    )
+                )
+        return drift
+
+    def update_params(
+        self, rewards_to_go, advantage_estimates, states, actions, total_timesteps
+    ):
+        # Line 6 in Pseudocode
+        normalisation_factor = 1 / (
+            total_timesteps
+        )  # 1 / D_k T, which is just timesteps in trajectory for us because we have 1 trajectory
+        network_probability_ratio = (
+            torch.stack(  # Stack all the values in our list together,into one big list
+                [
+                    self.probability_ratios(this_state, this_action)
+                    for this_state, this_action in zip(states, actions)
+                ]
+            )
+        )  # pi (a_t| s_t) / pi (a_t, s_t) #TODO this isn't working
+
+        drift = self.calculate_drift(
+            network_probability_ratio, advantage_estimates
+        )  # Fig 9 DPO paper, drift is advantage estimate weighted by probability.
+        policy_loss = -normalisation_factor * torch.sum(drift * advantage_estimates)
+
+        # Entropy bonus
+        dist = self.policy_network._get_distribution(states)
+        entropy = dist.entropy().mean()
+        policy_loss = policy_loss - self.entropy_coef * entropy
+
+        self.policy_optimiser.zero_grad()
+        policy_loss.backward()
+        self.policy_optimiser.step()
+
+        # Line 7 in pseudocode
+        value_estimates = torch.tensor(
+            [self.value_network.forward(this_state) for this_state in states],
+            requires_grad=True,
+        )
+        value_loss = normalisation_factor * torch.mean(
+            torch.square(value_estimates - rewards_to_go)
+        )
+        value_loss.backward()
+        self.value_optimiser.step()
+
+
 def verbose_train(environment):
     """Train our model with progress updates and rendering
 
@@ -503,7 +612,7 @@ def verbose_train(environment):
         )
     else:
         env = gym.make(environment["name"], render_mode="rgb_array")
-    model = PPOAgent(
+    model = DPOAgent(
         env,
         epsilon=0.2,
         observation_space=environment["observation_space"],
