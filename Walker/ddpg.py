@@ -133,7 +133,7 @@ class DDPGAgent(Agent):
         loss = 0
         for observation in data: 
             current_state, action, reward, next_state, terminal = observation
-            loss += -(self.critic.get_q_value(current_state, self.actor.get_action(current_state)))
+            loss += -(self.critic.get_q_value(current_state, self.actor.get_action(current_state))) # should be target
             i += 1
 
         if (i != 0):
@@ -141,7 +141,7 @@ class DDPGAgent(Agent):
 
         return loss 
 
-    def train(self, num_train_episodes=1000000, start_steps=100):
+    def train(self, num_train_episodes=100000, start_steps=100):
 
         last_s, _ = self.env.reset()
 
@@ -308,7 +308,7 @@ class ActorNetwork(nn.Module):
     
 
     def get_action(self, state, test=False):
-        noise_rate = 0.9
+        noise_rate = 0.1
         a = self.forward(torch.as_tensor(state, dtype=torch.float32))
 
         if not test:
