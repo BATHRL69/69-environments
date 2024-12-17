@@ -17,6 +17,9 @@ import torch.optim as optim
 import matplotlib.pyplot as plt
 import random
 
+GLOBAL_TIMESTEPS = []
+GLOBAL_REWARDS = []
+
 
 class PPOPolicyNetwork(nn.Module):
     """This is sometimes also called the ACTOR network.
@@ -123,8 +126,8 @@ class PPOAgent(Agent):
         weight_decay=0,
         lambda_gae=0.95,
         minibatch_size=4096,
-        num_trajectories=10,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
-        num_epochs=2,
+        num_trajectories=1,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
+        num_epochs=3,
         entropy_coef=0.01,
     ):
         super(PPOAgent, self).__init__(env)
@@ -410,17 +413,25 @@ class PPOAgent(Agent):
         Returns:
             array: Total rewards, for each training iteration
         """
-        total_timesteps = 0
-        total_rewards = []
-
-        while total_timesteps < num_iterations:
-            timesteps, reward = (
+        timesteps = 0
+        episodes = 0
+        while timesteps < num_iterations:
+            elapsed_timesteps, reward = (
                 self.simulate_episode()
             )  # Simulate an episode and collect rewards
-            total_rewards.append(reward)
-            total_timesteps += timesteps
+            timesteps += elapsed_timesteps
+            episodes += 1 * self.num_trajectories
 
-        return total_rewards
+            self.reward_list.append(reward)
+            self.timestep_list.append(timesteps)
+
+            GLOBAL_TIMESTEPS.append(timesteps)
+            GLOBAL_REWARDS.append(reward)
+
+            print(
+                f"[Episode {episodes} / timestep {timesteps}] Received reward {reward:.3f}"
+            )
+        return self.reward_list
 
     def plot(self, average_rewards):
         """Plot the average rewards other time
@@ -625,10 +636,10 @@ def verbose_train(environment):
     model.render(num_timesteps=100_000)
 
 
-environments = [
-    {"name": "InvertedPendulum-v4", "observation_space": 4, "action_space": 1},
-    {"name": "Ant-v4", "observation_space": 27, "action_space": 8},
-    {"name": "Ant-v5", "observation_space": 105, "action_space": 8},
-    {"name": "Unitreee", "observation_space": 115, "action_space": 12},
-]
-verbose_train(environments[1])
+# environments = [
+#     {"name": "InvertedPendulum-v4", "observation_space": 4, "action_space": 1},
+#     {"name": "Ant-v4", "observation_space": 27, "action_space": 8},
+#     {"name": "Ant-v5", "observation_space": 105, "action_space": 8},
+#     {"name": "Unitreee", "observation_space": 115, "action_space": 12},
+# ]
+# verbose_train(environments[1])

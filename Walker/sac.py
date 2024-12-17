@@ -1,3 +1,5 @@
+from copy import deepcopy
+import cv2
 import gymnasium as gym
 import numpy as np
 import os
@@ -221,6 +223,7 @@ class SACAgent(Agent):
 
     def simulate_episode(self, should_learn=True):
         reward_total = 0
+        mean_reward_total = 0
 
         state, _ = self.env.reset()
         state = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
@@ -241,6 +244,13 @@ class SACAgent(Agent):
 
             reward_total += reward
 
+            with torch.no_grad():
+                mean_action = self.predict(state)
+                
+            simulated_env = deepcopy(self.env) 
+            _, mean_reward, _, _, _ = simulated_env.step(mean_action.squeeze())
+            mean_reward_total += mean_reward
+
             # line 5-6 of pseudocode
             new_state = torch.tensor(new_state, dtype=torch.float32).unsqueeze(0)
 
@@ -260,7 +270,7 @@ class SACAgent(Agent):
             
             state = new_state
 
-        return timestep, reward_total
+        return timestep, mean_reward_total
     
 
     def update_params(self):
@@ -280,8 +290,6 @@ class SACAgent(Agent):
         critic_target_clipped = torch.min(critic_target_1_prediction, critic_target_2_prediction)
 
         alpha = self.log_alpha.exp() if self.fixed_alpha is None else self.fixed_alpha
-
-        print(alpha)
 
         predicted_target_reward = critic_target_clipped - alpha * log_actor_probability_new
         target = rewards + self.gamma * (1 - terminals) * predicted_target_reward
@@ -320,9 +328,12 @@ class SACAgent(Agent):
 
 
     def predict(self, state):
+        
         with torch.no_grad():
             action = self.actor.forward(state.unsqueeze(0))
-        return action[0].detach().numpy()[0]
+            scaled_action = torch.tanh(action[0])*self.actor.action_max
+        return scaled_action.detach().numpy()[0]
+        # return action[0].detach().numpy()[0]
     
 
     def save(self, path):
@@ -348,17 +359,32 @@ class SACAgent(Agent):
                 self.critics_optimiser.load_state_dict(critics_optim_dict)
 
 
-env = gym.make("Ant-v4", render_mode="rgb_array")
-SAVE_PATH = "sac_ant.data"
+# env = gym.make("Ant-v4", render_mode="rgb_array")
+# SAVE_PATH = "sac_ant2.data"
 
-agent = SACAgent(env)
-agent.load(SAVE_PATH)
-agent.train(num_timesteps=200000, start_timesteps=1000)
-agent.save(SAVE_PATH)
-agent.render()
+# train_agent = SACAgent(env)
+# train_agent.load(SAVE_PATH)
+# agent.train(num_timesteps=2_000, start_timesteps=1000)
+# agent.save(SAVE_PATH)
+# train_agent.render()
 
-env.close()
+# obs, info = env.reset()
 
+# for i in range(10_000):
+#     action = train_agent.actor.sample(torch.Tensor([obs]))
+#     obs, reward, done, trunacted ,info = env.step(action[0].detach().numpy()[0])
+#     img = env.render()
+#     print(img)
+#     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+#     cv2.imshow("Double Inverted Pendulum", img)
+
+#     if cv2.waitKey(1) & 0xFF == ord('q'):
+#         break
+    
+#     if done:
+#         obs, info = env.reset()
+
+# env.close()
 
 # env = gym.make("Humanoid-v4", render_mode="rgb_array")
 # SAVE_PATH = "sac_humanoid.data"

@@ -1,11 +1,11 @@
 import gymnasium as gym
-from stable_baselines3 import PPO
+from stable_baselines3 import SAC
 import cv2
 
-env = gym.make("InvertedDoublePendulum-v4", render_mode="rgb_array")
+env = gym.make("Ant-v4", render_mode="rgb_array")
 
-model = PPO("MlpPolicy", env, verbose=1, device="cuda")
-model.learn(total_timesteps=300_000)
+model = SAC("MlpPolicy", env, verbose=1, device="cuda")
+model.learn(total_timesteps=1000)
 model.save("ppo_inverted_double_pendulum")
 
 obs, info = env.reset()
