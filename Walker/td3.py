@@ -146,11 +146,11 @@ class TD3Agent(Agent):
             pred_q1 = self.critic_1.get_q_value(current_state, action)
             pred_q2 = self.critic_2.get_q_value(current_state, action)
 
-            eps = torch.randn_like(action) * self.actor_target_noise
+            eps = torch.randn(action.shape) * self.actor_target_noise
             eps = torch.clamp(eps, -self.actor_noise_clip, self.actor_noise_clip)
 
             noised_target_action = self.target_actor.get_action(next_state) + eps
-            noised_target_action = torch.clamp(noised_target_action, self.action_limit_low, self.action_limit_high)
+            noised_target_action = torch.clamp(noised_target_action, self.act_limit_low, self.act_limit_high)
 
             true = (reward + self.gamma*(1 - terminal)*self.get_min_target_q_value(next_state, noised_target_action))
 
@@ -195,7 +195,7 @@ class TD3Agent(Agent):
 
         return loss 
 
-    def train(self, num_train_episodes=1000000, start_steps=100):
+    def train(self, num_train_episodes=100000, start_steps=100):
 
         last_s, _ = self.env.reset()
 
