@@ -20,6 +20,7 @@ import random
 GLOBAL_TIMESTEPS = []
 GLOBAL_REWARDS = []
 
+
 class PPOPolicyNetwork(nn.Module):
     """This is sometimes also called the ACTOR network.
     Basically, the goal of this network is to take in a state, and give us the best possible actions to take in that state.
@@ -125,8 +126,8 @@ class PPOAgent(Agent):
         weight_decay=0,
         lambda_gae=0.95,
         minibatch_size=4096,
-        num_trajectories=10,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
-        num_epochs=2,
+        num_trajectories=1,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
+        num_epochs=3,
         entropy_coef=0.01,
     ):
         super(PPOAgent, self).__init__(env)
@@ -412,19 +413,25 @@ class PPOAgent(Agent):
         Returns:
             array: Total rewards, for each training iteration
         """
-        total_timesteps = 0
-        total_rewards = []
-
-        while total_timesteps < num_iterations:
-            timesteps, reward = (
+        timesteps = 0
+        episodes = 0
+        while timesteps < num_iterations:
+            elapsed_timesteps, reward = (
                 self.simulate_episode()
             )  # Simulate an episode and collect rewards
+            timesteps += elapsed_timesteps
+            episodes += 1 * self.num_trajectories
+
+            self.reward_list.append(reward)
+            self.timestep_list.append(timesteps)
+
             GLOBAL_TIMESTEPS.append(timesteps)
             GLOBAL_REWARDS.append(reward)
-            total_rewards.append(reward)
-            total_timesteps += timesteps
 
-        return total_rewards
+            print(
+                f"[Episode {episodes} / timestep {timesteps}] Received reward {reward:.3f}"
+            )
+        return self.reward_list
 
     def plot(self, average_rewards):
         """Plot the average rewards other time

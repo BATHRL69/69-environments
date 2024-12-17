@@ -1,4 +1,4 @@
-import agent,sac,ppo,ddpg
+import agent, sac, ppo, ddpg
 import gymnasium as gym
 import numpy as np
 
@@ -21,9 +21,9 @@ np.save("sac_rewards_mean_500000.npy",np.array(train_agent.reward_list))
 # timestep_list = ddpg.GLOBAL_TIMESTEPS
 # reward_list = ddpg.GLOBAL_REWARDS
 
-#PPO
-# train_agent = ppo.PPOAgent(env,observation_space=27,action_space=8)
-# train_agent.train()
-# # timestep_list = ppo.GLOBAL_TIMESTEPS
-# # reward_list = ppo.GLOBAL_REWARDS
-# env.close()
+# PPO
+train_agent = ppo.PPOAgent(env, observation_space=27, action_space=8)
+train_agent.efficient_train(10000)
+timestep_list_ppo = ppo.GLOBAL_TIMESTEPS
+reward_list_ppo = ppo.GLOBAL_REWARDS
+env.close()
