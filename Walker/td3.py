@@ -55,7 +55,8 @@ class TD3Agent(Agent):
             critic_lr: float = 0.0001,
             polyak: float = 0.995,
             gamma: float = 0.99,
-            training_frequency: int = 10
+            training_frequency: int = 10,
+            actor_update_frequency: int = 2
     ):
         # set hyperparams
         self.max_buffer_size = max_buffer_size
@@ -65,6 +66,7 @@ class TD3Agent(Agent):
         self.polyak = polyak
         self.gamma = gamma
         self.training_frequency = training_frequency
+        self.actor_update_frequency = actor_update_frequency
 
         # set up environment
         self.env = env
@@ -228,7 +230,7 @@ class TD3Agent(Agent):
                 last_s = new_s
 
             if episode % self.training_frequency == 0:
-                self.update_weights()
+                self.update_weights((episode % self.actor_update_frequency == 0))
 
         episodic_rewards = []
 
@@ -284,7 +286,8 @@ class TD3Agent(Agent):
         plt.legend()
         plt.show()
 
-    def update_weights(self):
+    def update_weights(self, update_actor):
+        
         samples = self.replay_buffer.sample()
         self.actor_optimiser.zero_grad()
         self.critic_optimiser_1.zero_grad()
@@ -304,41 +307,41 @@ class TD3Agent(Agent):
         critic_loss_2.backward()
         self.critic_optimiser_2.step()
 
-        # freeze both critics
-        for parameter in self.critic_1.parameters():
-            parameter.requires_grad = False
+        if (update_actor):
+            # freeze both critics
+            for parameter in self.critic_1.parameters():
+                parameter.requires_grad = False
 
-        for parameter in self.critic_2.parameters():
-            parameter.requires_grad = False
-        
+            for parameter in self.critic_2.parameters():
+                parameter.requires_grad = False
+            
+            # actor loss computation
+            actor_loss = self.actor_loss(samples)
+            self.actor_losses.append(actor_loss.item())
 
-        # actor loss computation
-        actor_loss = self.actor_loss(samples)
-        self.actor_losses.append(actor_loss.item())
+            actor_loss.backward()
+            self.actor_optimiser.step()
 
-        actor_loss.backward()
-        self.actor_optimiser.step()
+            # unfreeze both critics
+            for parameter in self.critic_1.parameters():
+                parameter.requires_grad = True
 
-        # unfreeze both critics
-        for parameter in self.critic_1.parameters():
-            parameter.requires_grad = True
+            for parameter in self.critic_2.parameters():
+                parameter.requires_grad = True
 
-        for parameter in self.critic_2.parameters():
-            parameter.requires_grad = True
+            # polyak averaging -> actor params
+            for actor_p, target_actor_p in zip(self.actor.parameters(), self.target_actor.parameters()):
+                target_actor_p.data.mul_(self.polyak)
+                target_actor_p.data.add_((1 - self.polyak) * actor_p.data)
 
-        # polyak averaging -> actor params
-        for actor_p, target_actor_p in zip(self.actor.parameters(), self.target_actor.parameters()):
-            target_actor_p.data.mul_(self.polyak)
-            target_actor_p.data.add_((1 - self.polyak) * actor_p.data)
+            # polyak averaging -> critic 1 params
+            for critic_p, target_critic_p in zip(self.critic_1.parameters(), self.target_critic_1.parameters()):
+                target_critic_p.data.mul_(self.polyak)
+                target_critic_p.data.add_((1 - self.polyak) * critic_p.data)
 
-        # polyak averaging -> critic 1 params
-        for critic_p, target_critic_p in zip(self.critic_1.parameters(), self.target_critic_1.parameters()):
-            target_critic_p.data.mul_(self.polyak)
-            target_critic_p.data.add_((1 - self.polyak) * critic_p.data)
-
-        for critic_p, target_critic_p in zip(self.critic_2.parameters(), self.target_critic_2.parameters()):
-            target_critic_p.data.mul_(self.polyak)
-            target_critic_p.data.add_((1 - self.polyak) * critic_p.data)
+            for critic_p, target_critic_p in zip(self.critic_2.parameters(), self.target_critic_2.parameters()):
+                target_critic_p.data.mul_(self.polyak)
+                target_critic_p.data.add_((1 - self.polyak) * critic_p.data)
 
 class ActorNetwork(nn.Module):
 
