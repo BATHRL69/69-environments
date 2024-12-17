@@ -176,7 +176,7 @@ class TD3Agent(Agent):
 
         for observation in data: 
             current_state, action, reward, next_state, terminal = observation
-            loss += -(self.get_min_q_value(current_state, self.target_actor.get_action(current_state)))
+            loss += -(self.get_min_q_value(current_state, self.actor.get_action(current_state)))
 
         if (N != 0):
             loss = loss / N
@@ -315,6 +315,7 @@ class TD3Agent(Agent):
         # actor loss computation
         actor_loss = self.actor_loss(samples)
         self.actor_losses.append(actor_loss.item())
+
         actor_loss.backward()
         self.actor_optimiser.step()
 
