@@ -17,6 +17,8 @@ import torch.optim as optim
 import matplotlib.pyplot as plt
 import random
 
+GLOBAL_TIMESTEPS = []
+GLOBAL_REWARDS = []
 
 class PPOPolicyNetwork(nn.Module):
     """This is sometimes also called the ACTOR network.
@@ -417,6 +419,8 @@ class PPOAgent(Agent):
             timesteps, reward = (
                 self.simulate_episode()
             )  # Simulate an episode and collect rewards
+            GLOBAL_TIMESTEPS.append(timesteps)
+            GLOBAL_REWARDS.append(reward)
             total_rewards.append(reward)
             total_timesteps += timesteps
 
@@ -625,10 +629,10 @@ def verbose_train(environment):
     model.render(num_timesteps=100_000)
 
 
-environments = [
-    {"name": "InvertedPendulum-v4", "observation_space": 4, "action_space": 1},
-    {"name": "Ant-v4", "observation_space": 27, "action_space": 8},
-    {"name": "Ant-v5", "observation_space": 105, "action_space": 8},
-    {"name": "Unitreee", "observation_space": 115, "action_space": 12},
-]
-verbose_train(environments[1])
+# environments = [
+#     {"name": "InvertedPendulum-v4", "observation_space": 4, "action_space": 1},
+#     {"name": "Ant-v4", "observation_space": 27, "action_space": 8},
+#     {"name": "Ant-v5", "observation_space": 105, "action_space": 8},
+#     {"name": "Unitreee", "observation_space": 115, "action_space": 12},
+# ]
+# verbose_train(environments[1])
