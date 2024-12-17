@@ -56,7 +56,9 @@ class TD3Agent(Agent):
             polyak: float = 0.995,
             gamma: float = 0.99,
             training_frequency: int = 10,
-            actor_update_frequency: int = 2
+            actor_update_frequency: int = 2,
+            target_noise=0.2, 
+            noise_clip=0.5,
     ):
         # set hyperparams
         self.max_buffer_size = max_buffer_size
@@ -67,12 +69,14 @@ class TD3Agent(Agent):
         self.gamma = gamma
         self.training_frequency = training_frequency
         self.actor_update_frequency = actor_update_frequency
+        self.actor_target_noise = target_noise
+        self.actor_noise_clip = noise_clip
 
         # set up environment
         self.env = env
         action_dim: int = self.env.action_space.shape[0]
-        act_limit_high: int = self.env.action_space.high[0]
-        act_limit_low: int = self.env.action_space.low[0]
+        self.act_limit_high: int = self.env.action_space.high[0]
+        self.act_limit_low: int = self.env.action_space.low[0]
         state_dim: int = self.env.observation_space.shape[0]
 
         self.replay_buffer = ReplayBuffer(self.max_buffer_size, self.replay_sample_size)
@@ -83,8 +87,8 @@ class TD3Agent(Agent):
             ReLU(),
             action_dim,
             state_dim,
-            act_limit_high,
-            act_limit_low
+            self.act_limit_high,
+            self.act_limit_low
         )
         self.actor_optimiser = Adam(self.actor.parameters(), lr = self.actor_lr)
 
@@ -142,7 +146,13 @@ class TD3Agent(Agent):
             pred_q1 = self.critic_1.get_q_value(current_state, action)
             pred_q2 = self.critic_2.get_q_value(current_state, action)
 
-            true = (reward + self.gamma*(1 - terminal)*self.get_min_target_q_value(next_state, self.target_actor.get_action(next_state)))
+            eps = torch.randn_like(action) * self.actor_target_noise
+            eps = torch.clamp(eps, -self.actor_noise_clip, self.actor_noise_clip)
+
+            noised_target_action = self.target_actor.get_action(next_state) + eps
+            noised_target_action = torch.clamp(noised_target_action, self.action_limit_low, self.action_limit_high)
+
+            true = (reward + self.gamma*(1 - terminal)*self.get_min_target_q_value(next_state, noised_target_action))
 
             loss_q1 += (pred_q1 - true)**2
             loss_q2 += (pred_q2 - true)**2
@@ -374,7 +384,7 @@ class ActorNetwork(nn.Module):
     
 
     def get_action(self, state, test=False):
-        noise_rate = 0.9
+        noise_rate = 0.1
         a = self.forward(torch.as_tensor(state, dtype=torch.float32))
 
         if not test:
