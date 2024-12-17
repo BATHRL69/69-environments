@@ -55,7 +55,8 @@ class DDPGAgent(Agent):
             critic_lr: float = 0.0001,
             polyak: float = 0.995,
             gamma: float = 0.99,
-            training_frequency: int = 10
+            training_frequency: int = 10,
+            num_train_episodes: int = 100000
     ):
         # set hyperparams
         self.max_buffer_size = max_buffer_size
@@ -65,6 +66,7 @@ class DDPGAgent(Agent):
         self.polyak = polyak
         self.gamma = gamma
         self.training_frequency = training_frequency
+        self.num_train_episodes = num_train_episodes
 
         # set up environment
         self.env = env
@@ -133,7 +135,7 @@ class DDPGAgent(Agent):
         loss = 0
         for observation in data: 
             current_state, action, reward, next_state, terminal = observation
-            loss += -(self.critic.get_q_value(current_state, self.actor.get_action(current_state))) # should be target
+            loss += -(self.critic.get_q_value(current_state, self.actor.get_action(current_state)))
             i += 1
 
         if (i != 0):
@@ -141,7 +143,7 @@ class DDPGAgent(Agent):
 
         return loss 
 
-    def train(self, num_train_episodes=100000, start_steps=100):
+    def train(self, start_steps=100):
 
         last_s, _ = self.env.reset()
 
@@ -161,7 +163,7 @@ class DDPGAgent(Agent):
         print("START TRAINING")
         alive = 0
         lives = 0
-        for episode in tqdm(range(num_train_episodes)):
+        for episode in tqdm(range(self.num_train_episodes)):
 
             # action -> numpy array
             a = self.actor.get_action(last_s).detach().numpy()

@@ -59,6 +59,7 @@ class TD3Agent(Agent):
             actor_update_frequency: int = 2,
             target_noise=0.2, 
             noise_clip=0.5,
+            num_train_episodes: int = 100000
     ):
         # set hyperparams
         self.max_buffer_size = max_buffer_size
@@ -71,6 +72,7 @@ class TD3Agent(Agent):
         self.actor_update_frequency = actor_update_frequency
         self.actor_target_noise = target_noise
         self.actor_noise_clip = noise_clip
+        self.num_train_episodes = num_train_episodes
 
         # set up environment
         self.env = env
@@ -195,7 +197,7 @@ class TD3Agent(Agent):
 
         return loss 
 
-    def train(self, num_train_episodes=100000, start_steps=100):
+    def train(self, start_steps=100):
 
         last_s, _ = self.env.reset()
 
@@ -215,7 +217,7 @@ class TD3Agent(Agent):
         print("START TRAINING")
         alive = 0
         lives = 0
-        for episode in tqdm(range(num_train_episodes)):
+        for episode in tqdm(range(self.num_train_episodes)):
 
             # action -> numpy array
             a = self.actor.get_action(last_s).detach().numpy()
