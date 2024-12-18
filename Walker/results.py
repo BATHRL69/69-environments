@@ -66,7 +66,6 @@ env = gym.make("Ant-v4", render_mode="rgb_array")
 # reward_list = ddpg.GLOBAL_REWARDS
 
 # PPO
-<<<<<<< HEAD
 # train_agent = ppo.PPOAgent(env, observation_space=27, action_space=8, std=0.3)
 # train_agent.efficient_train(1_000_000)
 # timestep_list_ppo = ppo.GLOBAL_TIMESTEPS
@@ -76,7 +75,6 @@ env = gym.make("Ant-v4", render_mode="rgb_array")
 
 # np.save("ppo_timesteps_mean_1000000.npy", np.array(train_agent.timestep_list))
 # np.save("ppo_rewards_mean_1000000.npy", np.array(train_agent.reward_list))
-=======
 train_agent = ppo.PPOAgent(env, observation_space=27, action_space=8, std=0.6)
 train_agent.efficient_train(100_000)
 timestep_list_ppo = ppo.GLOBAL_TIMESTEPS
@@ -100,4 +98,3 @@ train_agent.render()
 env.close()
 np.save("dpo_timesteps_mean.npy", np.array(train_agent.timestep_list))
 np.save("dpo_rewards_mean.npy", np.array(train_agent.reward_list))
->>>>>>> 85780259279f12056189f9ed9615316cd90704ca
