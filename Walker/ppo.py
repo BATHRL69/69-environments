@@ -33,7 +33,6 @@ class PPOPolicyNetwork(nn.Module):
         action_space=8,  # Defaults set from ant walker
         std=0.4,  # Standard deviation for normal distribution
     ):
-        # TODO need to work out what network is going to work best here
         super(PPOPolicyNetwork, self).__init__()
 
         self.network = nn.Sequential(
@@ -43,13 +42,34 @@ class PPOPolicyNetwork(nn.Module):
             nn.ReLU(),
             nn.Linear(32, action_space),
         )
-        self.std = std
-        self.log_std = nn.Parameter(torch.full((action_space,), np.log(std)))
+        self.max_std = std
+        self.log_std = np.log(std)
 
-    def _get_distribution(self, state):
+    def update_std(self, timesteps_through, total_timesteps):
+        """Update STD over training, to encourage exploration at the start, and then hone in on correct actions neared the end
+
+        Args:
+            timesteps_through (int): Amount of timesteps through at curent point in training
+            total_timesteps (int): Total timesteps for training
+        """
+        min_std = 0.01
+        new_std = self.max_std - (self.max_std - min_std) * (
+            timesteps_through / total_timesteps
+        )
+        self.log_std = torch.tensor(np.log(new_std))
+
+    def get_distribution(self, state):
+        """Returns a normal distribution, from actions given state
+
+        Args:
+            state (torch.Tensor): The current state in environment
+
+        Returns:
+            torch.Distribution: A normal distribution, centered around action_values from the network
+        """
         action_values = self.network(state)
         std = torch.exp(self.log_std)
-        return Normal(action_values, self.std)
+        return Normal(action_values, std)
 
     def get_action(self, state):
         """Given a state, gets an action, sampled from normal distribution
@@ -61,7 +81,7 @@ class PPOPolicyNetwork(nn.Module):
             torch.tensor: action, probability
         """
         # action_values = self.network(state)
-        distribution = self._get_distribution(state)
+        distribution = self.get_distribution(state)
         action = distribution.sample()
         probability = distribution.log_prob(action).sum(dim=-1)
         return action, probability
@@ -77,7 +97,7 @@ class PPOPolicyNetwork(nn.Module):
             torch.Tensor: the log-probability of action given state
         """
         # action_values = self.network(state)
-        distribution = self._get_distribution(state)
+        distribution = self.get_distribution(state)
         log_probs = distribution.log_prob(action).sum(dim=-1)
 
         return log_probs  # We can do sum here because they are LOG probs, usually our conditional probability would be x * y.
@@ -163,6 +183,7 @@ class PPOAgent(Agent):
     def transfer_policy_net_to_old(self):
         """Copies our current policy into self.old_policy_network"""
         self.old_policy_network.load_state_dict(self.policy_network.state_dict())
+        self.old_policy_network.log_std = self.policy_network.log_std
 
     def probability_ratios(self, state, action):
         """Calculate our probability ratio , which is:
@@ -262,7 +283,7 @@ class PPOAgent(Agent):
                     action.detach().numpy()
                 )
                 done = is_finished or is_truncated
-                print(is_truncated, reward)
+                # print(is_truncated, reward)
                 trajectory.append(
                     (
                         state,
@@ -312,7 +333,7 @@ class PPOAgent(Agent):
         )  # We are minusing here because we are trying to find the arg max, so the LOSS needs to be negative. (since we are trying to minimise the loss)
 
         # Entropy bonus
-        dist = self.policy_network._get_distribution(states)
+        dist = self.policy_network.get_distribution(states)
         entropy = dist.entropy().mean()
         policy_loss = policy_loss - self.entropy_coef * entropy
 
@@ -419,6 +440,7 @@ class PPOAgent(Agent):
         timesteps = 0
         episodes = 0
         while timesteps < num_iterations:
+            self.policy_network.update_std(timesteps, num_iterations)
             elapsed_timesteps, reward = (
                 self.simulate_episode()
             )  # Simulate an episode and collect rewards
@@ -580,7 +602,7 @@ class DPOAgent(PPOAgent):
         policy_loss = -normalisation_factor * torch.sum(drift * advantage_estimates)
 
         # Entropy bonus
-        dist = self.policy_network._get_distribution(states)
+        dist = self.policy_network.get_distribution(states)
         entropy = dist.entropy().mean()
         policy_loss = policy_loss - self.entropy_coef * entropy
 
