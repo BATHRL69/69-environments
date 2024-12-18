@@ -1,12 +1,12 @@
 import gymnasium as gym
-from stable_baselines3 import SAC
+from stable_baselines3 import SAC,PPO
 import cv2
 
 env = gym.make("Ant-v4", render_mode="rgb_array")
 
 model = SAC("MlpPolicy", env, verbose=1, device="cuda")
 model.learn(total_timesteps=1000)
-model.save("ppo_inverted_double_pendulum")
+# model.save("ppo_inverted_double_pendulum")
 
 obs, info = env.reset()
 
