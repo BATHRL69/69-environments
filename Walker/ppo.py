@@ -31,7 +31,7 @@ class PPOPolicyNetwork(nn.Module):
         self,
         observation_space=27,  # Defaults set from ant walker
         action_space=8,  # Defaults set from ant walker
-        std=0.1,  # Standard deviation for normal distribution
+        std=0.4,  # Standard deviation for normal distribution
     ):
         # TODO need to work out what network is going to work best here
         super(PPOPolicyNetwork, self).__init__()
@@ -49,7 +49,7 @@ class PPOPolicyNetwork(nn.Module):
     def _get_distribution(self, state):
         action_values = self.network(state)
         std = torch.exp(self.log_std)
-        return Normal(action_values, std)
+        return Normal(action_values, self.std)
 
     def get_action(self, state):
         """Given a state, gets an action, sampled from normal distribution
@@ -121,7 +121,7 @@ class PPOAgent(Agent):
         gamma=0.99,
         observation_space=115,  # Default from ant-v4
         action_space=8,
-        std=0.1,
+        std=0.4,
         learning_rate=3e-4,
         weight_decay=0,
         lambda_gae=0.95,
@@ -255,11 +255,14 @@ class PPOAgent(Agent):
                 torch.tensor(state, dtype=torch.float32)
             )
             trajectory = []
+            done = False
             # Line 3 of pseudocode, here we are collecting a trajectory
-            while not is_finished and not is_truncated:
+            while not done:
                 new_state, reward, is_finished, is_truncated, _ = self.env.step(
                     action.detach().numpy()
                 )
+                done = is_finished or is_truncated
+                print(is_truncated, reward)
                 trajectory.append(
                     (
                         state,
