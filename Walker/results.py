@@ -11,10 +11,10 @@ train_agent.save(SAVE_PATH)
 # train_agent.render()
 env.close()
 
-np.save("sac_timesteps_mean_500000.npy",np.array(train_agent.timestep_list))
-np.save("sac_rewards_mean_500000.npy",np.array(train_agent.reward_list))
+np.save("sac_timesteps_mean_500000.npy", np.array(train_agent.timestep_list))
+np.save("sac_rewards_mean_500000.npy", np.array(train_agent.reward_list))
 
-#DDPG
+# DDPG
 # train_agent = ddpg.DDPGAgent(env)
 # train_agent.train(10000)
 # env.close()
@@ -22,8 +22,11 @@ np.save("sac_rewards_mean_500000.npy",np.array(train_agent.reward_list))
 # reward_list = ddpg.GLOBAL_REWARDS
 
 # PPO
-train_agent = ppo.PPOAgent(env, observation_space=27, action_space=8)
-train_agent.efficient_train(10000)
+train_agent = ppo.PPOAgent(env, observation_space=27, action_space=8, std=0.3)
+train_agent.efficient_train(100000)
 timestep_list_ppo = ppo.GLOBAL_TIMESTEPS
 reward_list_ppo = ppo.GLOBAL_REWARDS
 env.close()
+
+np.save("ppo_timesteps_mean.npy", np.array(train_agent.timestep_list))
+np.save("ppo_rewards_mean.npy", np.array(train_agent.reward_list))
