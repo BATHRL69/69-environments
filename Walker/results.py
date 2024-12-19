@@ -23,7 +23,7 @@ np.save("sac_rewards_mean_500000.npy", np.array(train_agent.reward_list))
 
 # PPO
 train_agent = ppo.PPOAgent(env, observation_space=27, action_space=8, std=0.6)
-train_agent.efficient_train(100_000)
+train_agent.efficient_train(10_000)
 timestep_list_ppo = ppo.GLOBAL_TIMESTEPS
 reward_list_ppo = ppo.GLOBAL_REWARDS
 train_agent.max_std = 0.01
@@ -37,7 +37,7 @@ np.save("ppo_rewards_mean.npy", np.array(train_agent.reward_list))
 ppo.GLOBAL_TIMESTEPS = []
 ppo.GLOBAL_REWARDS = []
 train_agent = ppo.DPOAgent(env, observation_space=27, action_space=8, std=0.6)
-train_agent.efficient_train(100_000)
+train_agent.efficient_train(10_000)
 timestep_list_ppo = ppo.GLOBAL_TIMESTEPS
 reward_list_ppo = ppo.GLOBAL_REWARDS
 train_agent.max_std = 0.01
