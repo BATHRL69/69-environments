@@ -477,7 +477,7 @@ class PPOAgent(Agent):
             torch.Tensor: The best action to take in state S
         """
         with torch.no_grad():
-            action = self.policy_network.forward(state)
+            action, _ = self.policy_network.get_action(state)
         return action.detach().numpy()
 
     def save(self, path):
