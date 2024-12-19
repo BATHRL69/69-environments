@@ -12,9 +12,6 @@ from tqdm import tqdm
 
 from agent import Agent
 
-GLOBAL_TIMESTEPS = []
-GLOBAL_REWARDS = []
-
 random.seed(0)
 
 # https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/algos/pytorch/ddpg/core.py
@@ -45,7 +42,7 @@ class ReplayBuffer:
             sample.append(self.buffer[index])
         return sample
 
-class DDPGAgent(Agent):
+class TD3Agent(Agent):
 
     hidden_size = (256, 256)
 
@@ -59,6 +56,9 @@ class DDPGAgent(Agent):
             polyak: float = 0.995,
             gamma: float = 0.99,
             training_frequency: int = 10,
+            actor_update_frequency: int = 2,
+            target_noise=0.2, 
+            noise_clip=0.5,
             num_train_episodes: int = 100000
     ):
         # set hyperparams
@@ -69,13 +69,16 @@ class DDPGAgent(Agent):
         self.polyak = polyak
         self.gamma = gamma
         self.training_frequency = training_frequency
+        self.actor_update_frequency = actor_update_frequency
+        self.actor_target_noise = target_noise
+        self.actor_noise_clip = noise_clip
         self.num_train_episodes = num_train_episodes
 
         # set up environment
         self.env = env
         action_dim: int = self.env.action_space.shape[0]
-        act_limit_high: int = self.env.action_space.high[0]
-        act_limit_low: int = self.env.action_space.low[0]
+        self.act_limit_high: int = self.env.action_space.high[0]
+        self.act_limit_low: int = self.env.action_space.low[0]
         state_dim: int = self.env.observation_space.shape[0]
 
         self.replay_buffer = ReplayBuffer(self.max_buffer_size, self.replay_sample_size)
@@ -86,63 +89,111 @@ class DDPGAgent(Agent):
             ReLU(),
             action_dim,
             state_dim,
-            act_limit_high,
-            act_limit_low
+            self.act_limit_high,
+            self.act_limit_low
         )
         self.actor_optimiser = Adam(self.actor.parameters(), lr = self.actor_lr)
 
-        # q-value function
-        self.critic = CriticNetwork(
+        # q-value function 1
+        self.critic_1 = CriticNetwork(
             self.hidden_size,
             ReLU(),
             state_dim,
             action_dim
         )
-        self.critic_optimiser = Adam(self.critic.parameters(), lr = self.critic_lr)
+        self.critic_optimiser_1 = Adam(self.critic_1.parameters(), lr = self.critic_lr)
+
+        # q-value function 2
+        self.critic_2 = CriticNetwork(
+            self.hidden_size,
+            ReLU(),
+            state_dim,
+            action_dim
+        )
+        self.critic_optimiser_2 = Adam(self.critic_2.parameters(), lr = self.critic_lr)
 
         # target
         self.target_actor = copy.deepcopy(self.actor)
-        self.target_critic = copy.deepcopy(self.critic)
+        self.target_critic_1 = copy.deepcopy(self.critic_1)
+        self.target_critic_2 = copy.deepcopy(self.critic_2)
 
         # freeze target actor and target critic
         for parameter in self.target_actor.parameters():
             parameter.requires_grad = False
 
-        for parameter in self.target_critic.parameters():
+        for parameter in self.target_critic_1.parameters():
             parameter.requires_grad = False
 
-        self.critic_losses = []
+        for parameter in self.target_critic_2.parameters():
+            parameter.requires_grad = False
+
+        self.critic_losses_1 = []
+        self.critic_losses_2 = []
         self.actor_losses = []
 
     def predict(self, state):
         with torch.no_grad():
             return self.actor(state).numpy()
 
-    def critic_loss(self, data):
+    def get_critic_losses(self, data):
         # extract observations from data
-        i = 0
-        loss = 0
+        loss_q1 = 0
+        loss_q2 = 0
+
+        N = len(data)
+
         for observation in data:
             current_state, action, reward, next_state, terminal = observation
-            pred = self.critic.get_q_value(current_state, action)
-            loss += (pred - (reward+ self.gamma*(1 - terminal)*self.target_critic.get_q_value(next_state, self.target_actor.get_action(next_state))))**2
-            i += 1
-            
-        if (i != 0):
-            loss = loss / i
 
-        return loss
+            pred_q1 = self.critic_1.get_q_value(current_state, action)
+            pred_q2 = self.critic_2.get_q_value(current_state, action)
+
+            eps = torch.randn(action.shape) * self.actor_target_noise
+            eps = torch.clamp(eps, -self.actor_noise_clip, self.actor_noise_clip)
+
+            noised_target_action = self.target_actor.get_action(next_state) + eps
+            noised_target_action = torch.clamp(noised_target_action, self.act_limit_low, self.act_limit_high)
+
+            true = (reward + self.gamma*(1 - terminal)*self.get_min_target_q_value(next_state, noised_target_action))
+
+            loss_q1 += (pred_q1 - true)**2
+            loss_q2 += (pred_q2 - true)**2
+            
+        if (N != 0):
+            loss_q1 = loss_q1 / N
+            loss_q2 = loss_q2 / N
+
+        return loss_q1, loss_q2
+    
+
+    def get_min_target_q_value(self, state, action):
+        q_value_1 = self.target_critic_1.get_q_value(state, action)
+        q_value_2 = self.target_critic_2.get_q_value(state, action)
+
+        min_q_value = torch.min(q_value_1, q_value_2) # change if gradient issues?
+
+        return min_q_value
+    
+
+    def get_min_q_value(self, state, action):
+        q_value_1 = self.critic_1.get_q_value(state, action)
+        q_value_2 = self.critic_2.get_q_value(state, action)
+
+        min_q_value = torch.min(q_value_1, q_value_2) # change if gradient issues?
+
+        return min_q_value
+    
 
     def actor_loss(self, data):
-        i = 0
+        N = len(data)
         loss = 0
+
         for observation in data: 
             current_state, action, reward, next_state, terminal = observation
-            loss += -(self.critic.get_q_value(current_state, self.actor.get_action(current_state)))
-            i += 1
+            loss += -(self.get_min_q_value(current_state, self.actor.get_action(current_state)))
 
-        if (i != 0):
-            loss = loss / i
+        if (N != 0):
+            loss = loss / N
 
         return loss 
 
@@ -181,8 +232,6 @@ class DDPGAgent(Agent):
             if done:
                 last_s, _ = self.env.reset()
                 episodic_rewards.append(total_reward)
-                GLOBAL_REWARDS.append(total_reward)
-                GLOBAL_TIMESTEPS.append(episode)
                 # print(lives, "attempt:\n", "died after ", alive, " steps", "total reward", total_reward, "\n")
                 total_reward = 0
                 alive = 0
@@ -193,7 +242,7 @@ class DDPGAgent(Agent):
                 last_s = new_s
 
             if episode % self.training_frequency == 0:
-                self.update_weights()
+                self.update_weights((episode % self.actor_update_frequency == 0))
 
         episodic_rewards = []
 
@@ -201,7 +250,7 @@ class DDPGAgent(Agent):
         print("START TESTING")
         alive = 0
         lives = 0
-        self.critic_losses = []
+        self.critic_losses_1 = []
         self.actor_losses = []
 
         for episode in tqdm(range(1000)):
@@ -228,61 +277,83 @@ class DDPGAgent(Agent):
                 last_s = new_s
 
         
-        # # Plot the episodic curve
-        # plt.plot(range(len(episodic_rewards)), episodic_rewards, label="Episodic rewards")
-        # plt.xlabel("Episodes")
-        # plt.ylabel("Total reward")
-        # plt.legend()
-        # plt.show()
+        # Plot the episodic curve
+        plt.plot(range(len(episodic_rewards)), episodic_rewards, label="Episodic rewards")
+        plt.xlabel("Episodes")
+        plt.ylabel("Total reward")
+        plt.legend()
+        plt.show()
 
-        # # Plot the critic loss curve
-        # plt.plot(range(len(self.critic_losses)), self.critic_losses, label="Critic loss")
-        # plt.xlabel("Episodes")
-        # plt.ylabel("Critic Losses")
-        # plt.legend()
-        # plt.show()
+        # Plot the critic loss curve
+        plt.plot(range(len(self.critic_losses_1)), self.critic_losses_1, label="Critic loss")
+        plt.xlabel("Episodes")
+        plt.ylabel("Critic Losses")
+        plt.legend()
+        plt.show()
 
-        # # Plot the actor loss curve
-        # plt.plot(range(len(self.actor_losses)), self.actor_losses, label="Actor loss")
-        # plt.xlabel("Episodes")
-        # plt.ylabel("Actor Losses")
-        # plt.legend()
-        # plt.show()
+        # Plot the actor loss curve
+        plt.plot(range(len(self.actor_losses)), self.actor_losses, label="Actor loss")
+        plt.xlabel("Episodes")
+        plt.ylabel("Actor Losses")
+        plt.legend()
+        plt.show()
 
-    def update_weights(self):
+    def update_weights(self, update_actor):
+        
         samples = self.replay_buffer.sample()
         self.actor_optimiser.zero_grad()
-        self.critic_optimiser.zero_grad()
+        self.critic_optimiser_1.zero_grad()
+        self.critic_optimiser_2.zero_grad()
+
 
         # compute critic loss
-        critic_loss = self.critic_loss(samples)
-        self.critic_losses.append(critic_loss.item())
-        critic_loss.backward()
-        self.critic_optimiser.step()
+        critic_loss_1, critic_loss_2 = self.get_critic_losses(samples)
 
-        # freeze the crtic
-        for parameter in self.critic.parameters():
-            parameter.requires_grad = False
+        # update critic 1
+        self.critic_losses_1.append(critic_loss_1.item())
+        critic_loss_1.backward()
+        self.critic_optimiser_1.step()
 
-        # actor loss computation
-        actor_loss = self.actor_loss(samples)
-        self.actor_losses.append(actor_loss.item())
-        actor_loss.backward()
-        self.actor_optimiser.step()
+        # update critic 2
+        self.critic_losses_2.append(critic_loss_2.item())
+        critic_loss_2.backward()
+        self.critic_optimiser_2.step()
 
-        # unfreeze the critic
-        for parameter in self.critic.parameters():
-            parameter.requires_grad = True
+        if (update_actor):
+            # freeze both critics
+            for parameter in self.critic_1.parameters():
+                parameter.requires_grad = False
 
-        # polyak averaging -> actor params
-        for actor_p, target_actor_p in zip(self.actor.parameters(), self.target_actor.parameters()):
-            target_actor_p.data.mul_(self.polyak)
-            target_actor_p.data.add_((1 - self.polyak) * actor_p.data)
+            for parameter in self.critic_2.parameters():
+                parameter.requires_grad = False
+            
+            # actor loss computation
+            actor_loss = self.actor_loss(samples)
+            self.actor_losses.append(actor_loss.item())
 
-        # polyak averaging -> critic params
-        for critic_p, target_critic_p in zip(self.critic.parameters(), self.target_critic.parameters()):
-            target_critic_p.data.mul_(self.polyak)
-            target_critic_p.data.add_((1 - self.polyak) * critic_p.data)
+            actor_loss.backward()
+            self.actor_optimiser.step()
+
+            # unfreeze both critics
+            for parameter in self.critic_1.parameters():
+                parameter.requires_grad = True
+
+            for parameter in self.critic_2.parameters():
+                parameter.requires_grad = True
+
+            # polyak averaging -> actor params
+            for actor_p, target_actor_p in zip(self.actor.parameters(), self.target_actor.parameters()):
+                target_actor_p.data.mul_(self.polyak)
+                target_actor_p.data.add_((1 - self.polyak) * actor_p.data)
+
+            # polyak averaging -> critic 1 params
+            for critic_p, target_critic_p in zip(self.critic_1.parameters(), self.target_critic_1.parameters()):
+                target_critic_p.data.mul_(self.polyak)
+                target_critic_p.data.add_((1 - self.polyak) * critic_p.data)
+
+            for critic_p, target_critic_p in zip(self.critic_2.parameters(), self.target_critic_2.parameters()):
+                target_critic_p.data.mul_(self.polyak)
+                target_critic_p.data.add_((1 - self.polyak) * critic_p.data)
 
 class ActorNetwork(nn.Module):
 
@@ -381,10 +452,10 @@ def render_agent(env, agent, num_episodes=5):
     env.close()
 
 
-# if __name__ == "__main__":
+if __name__ == "__main__":
 
-#     env = gym.make("Ant-v4", render_mode=None)
-#     agent = DDPGAgent(env)
-#     agent.train(10000)
-#     env = gym.make("Ant-v4", render_mode="rgb_array")
-#     render_agent(env, agent, num_episodes=10)
+    env = gym.make("Ant-v5", render_mode=None)
+    agent = TD3Agent(env)
+    agent.train()
+    env = gym.make("Ant-v5", render_mode="human")
+    render_agent(env, agent, num_episodes=10)

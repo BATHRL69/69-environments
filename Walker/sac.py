@@ -223,7 +223,6 @@ class SACAgent(Agent):
 
     def simulate_episode(self, should_learn=True):
         reward_total = 0
-        mean_reward_total = 0
 
         state, _ = self.env.reset()
         state = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
@@ -244,13 +243,6 @@ class SACAgent(Agent):
 
             reward_total += reward
 
-            with torch.no_grad():
-                mean_action = self.predict(state)
-                
-            simulated_env = deepcopy(self.env) 
-            _, mean_reward, _, _, _ = simulated_env.step(mean_action.squeeze())
-            mean_reward_total += mean_reward
-
             # line 5-6 of pseudocode
             new_state = torch.tensor(new_state, dtype=torch.float32).unsqueeze(0)
 
@@ -270,7 +262,7 @@ class SACAgent(Agent):
             
             state = new_state
 
-        return timestep, mean_reward_total
+        return timestep, reward_total
     
 
     def update_params(self):
