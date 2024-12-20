@@ -53,9 +53,11 @@ class PPOPolicyNetwork(nn.Module):
             total_timesteps (int): Total timesteps for training
         """
         min_std = 0.01
-        new_std = self.max_std - (self.max_std - min_std) * (
-            timesteps_through / total_timesteps
-        )
+        new_std = (
+            self.max_std
+            - (self.max_std - min_std) * (timesteps_through / total_timesteps)
+        ) + 0.0001  # Ensure it never gets to 0, this will give us nans
+        new_std = 0.1
         self.log_std = torch.tensor(np.log(new_std))
 
     def get_distribution(self, state):
@@ -142,11 +144,11 @@ class PPOAgent(Agent):
         observation_space=115,  # Default from ant-v4
         action_space=8,
         std=0.4,
-        learning_rate=3e-4,
+        learning_rate=1e-5,
         weight_decay=0,
         lambda_gae=0.95,
         minibatch_size=4096,
-        num_trajectories=1,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
+        num_trajectories=10,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
         num_epochs=3,
         entropy_coef=0.01,
     ):
@@ -339,6 +341,8 @@ class PPOAgent(Agent):
 
         self.policy_optimiser.zero_grad()
         policy_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.policy_network.parameters(), max_norm=1.0)
+
         self.policy_optimiser.step()
 
         # Line 7 in pseudocode
@@ -439,11 +443,13 @@ class PPOAgent(Agent):
         """
         timesteps = 0
         episodes = 0
+        torch.autograd.set_detect_anomaly(True)
         while timesteps < num_iterations:
             self.policy_network.update_std(timesteps, num_iterations)
             elapsed_timesteps, reward = (
                 self.simulate_episode()
             )  # Simulate an episode and collect rewards
+            reward = reward / self.num_trajectories
             timesteps += elapsed_timesteps
             episodes += 1 * self.num_trajectories
 
@@ -514,7 +520,7 @@ class DPOAgent(PPOAgent):
         observation_space=115,  # Default from ant-v4
         action_space=8,
         std=0.1,
-        learning_rate=3e-4,
+        learning_rate=1e-5,
         weight_decay=0,
         lambda_gae=0.95,
         minibatch_size=4096,
@@ -608,6 +614,7 @@ class DPOAgent(PPOAgent):
 
         self.policy_optimiser.zero_grad()
         policy_loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.policy_network.parameters(), max_norm=1.0)
         self.policy_optimiser.step()
 
         # Line 7 in pseudocode
