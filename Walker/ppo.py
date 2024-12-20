@@ -57,7 +57,6 @@ class PPOPolicyNetwork(nn.Module):
             self.max_std
             - (self.max_std - min_std) * (timesteps_through / total_timesteps)
         ) + 0.0001  # Ensure it never gets to 0, this will give us nans
-        new_std = 0.1
         self.log_std = torch.tensor(np.log(new_std))
 
     def get_distribution(self, state):
@@ -524,7 +523,7 @@ class DPOAgent(PPOAgent):
         weight_decay=0,
         lambda_gae=0.95,
         minibatch_size=4096,
-        num_trajectories=10,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
+        num_trajectories=1,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
         num_epochs=2,
         entropy_coef=0.01,
         alpha=2,
