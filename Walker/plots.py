@@ -1,6 +1,8 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+loaded_timesteps = np.load('sac_ant_1000000_timesteps.npy')[1:]
+loaded_rewards = np.load('sac_ant_1000000_rewards.npy')[1:]
 # loaded_timesteps = np.load("ppo_timesteps_mean_1000000.npy")#[1:]
 # loaded_rewards = np.load("ppo_rewards_mean_1000000.npy")#[1:]
 
