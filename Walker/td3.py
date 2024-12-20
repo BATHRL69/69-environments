@@ -17,6 +17,9 @@ random.seed(0)
 # https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/algos/pytorch/ddpg/core.py
 # https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/algos/pytorch/ddpg/ddpg.py
 
+GLOBAL_TIMESTEPS = []
+GLOBAL_REWARDS = []
+
 class ReplayBuffer:
 
     def __init__(self, max_buffer_size, sample_size):
@@ -232,6 +235,8 @@ class TD3Agent(Agent):
             if done:
                 last_s, _ = self.env.reset()
                 episodic_rewards.append(total_reward)
+                GLOBAL_REWARDS.append(total_reward)
+                GLOBAL_TIMESTEPS.append(episode)
                 # print(lives, "attempt:\n", "died after ", alive, " steps", "total reward", total_reward, "\n")
                 total_reward = 0
                 alive = 0
@@ -277,26 +282,26 @@ class TD3Agent(Agent):
                 last_s = new_s
 
         
-        # Plot the episodic curve
-        plt.plot(range(len(episodic_rewards)), episodic_rewards, label="Episodic rewards")
-        plt.xlabel("Episodes")
-        plt.ylabel("Total reward")
-        plt.legend()
-        plt.show()
+        # # Plot the episodic curve
+        # plt.plot(range(len(episodic_rewards)), episodic_rewards, label="Episodic rewards")
+        # plt.xlabel("Episodes")
+        # plt.ylabel("Total reward")
+        # plt.legend()
+        # plt.show()
 
-        # Plot the critic loss curve
-        plt.plot(range(len(self.critic_losses_1)), self.critic_losses_1, label="Critic loss")
-        plt.xlabel("Episodes")
-        plt.ylabel("Critic Losses")
-        plt.legend()
-        plt.show()
+        # # Plot the critic loss curve
+        # plt.plot(range(len(self.critic_losses_1)), self.critic_losses_1, label="Critic loss")
+        # plt.xlabel("Episodes")
+        # plt.ylabel("Critic Losses")
+        # plt.legend()
+        # plt.show()
 
-        # Plot the actor loss curve
-        plt.plot(range(len(self.actor_losses)), self.actor_losses, label="Actor loss")
-        plt.xlabel("Episodes")
-        plt.ylabel("Actor Losses")
-        plt.legend()
-        plt.show()
+        # # Plot the actor loss curve
+        # plt.plot(range(len(self.actor_losses)), self.actor_losses, label="Actor loss")
+        # plt.xlabel("Episodes")
+        # plt.ylabel("Actor Losses")
+        # plt.legend()
+        # plt.show()
 
     def update_weights(self, update_actor):
         
