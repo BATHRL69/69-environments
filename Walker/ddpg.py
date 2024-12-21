@@ -1,10 +1,11 @@
+import cv2
 import torch
 import torch.nn as nn
 from torch.optim import Adam
 from torch.nn import ReLU
 import gymnasium as gym
 import copy
-from typing import Tuple, List
+from typing import Any, NamedTuple, Tuple, List
 import matplotlib.pyplot as plt
 import numpy as np
 import random
@@ -20,46 +21,112 @@ random.seed(0)
 # https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/algos/pytorch/ddpg/core.py
 # https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/algos/pytorch/ddpg/ddpg.py
 
-class ReplayBuffer:
 
-    def __init__(self, max_buffer_size, sample_size):
-        self.max_buffer_size = max_buffer_size
-        self.sample_size = sample_size
-        self.buffer: List[Tuple] = []
+def make_video_ddpg(env_name,agent,save_path):
+    video_env = gym.make(env_name,render_mode="rgb_array")
+    print(f"Making video at {save_path}")
+    frames = []
+    state, _ = video_env.reset()
+    done = False
+    truncated = False
 
-    def add(self, observation):
-        if len(self.buffer) >= self.max_buffer_size:
-            # randomly select an index
-            index = random.randint(0, len(self.buffer) - 1)
-            self.buffer[index] = observation
-        else:
-            self.buffer.append(observation)
+    while not (done or truncated):
+        frame = video_env.render()
+        frames.append(frame)
 
-    def sample(self):
-        sample = []
-        indices_selected = set()
-        for i in range(self.sample_size):
-            index = random.randint(0, len(self.buffer) - 1)
-            while index in indices_selected:
-                index = random.randint(0, len(self.buffer) - 1)
-            sample.append(self.buffer[index])
-        return sample
+        # action = agent.predict(torch.Tensor(state))
+        # state, reward, done, truncated, info = env.step(action)
+        action = agent.actor.get_action(torch.Tensor([state]),test=False)
+        state, reward, done, truncated ,info = video_env.step(action[0].detach().numpy())
+
+    # Save frames as a video
+    height, width, _ = frames[0].shape
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    video = cv2.VideoWriter(save_path, fourcc, 30, (width, height))
+
+    for frame in frames:
+        video.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+
+    video.release()
+    video_env.close()
+
+# class ReplayBuffer:
+
+#     def __init__(self, max_buffer_size, sample_size):
+#         self.max_buffer_size = max_buffer_size
+#         self.sample_size = sample_size
+#         self.buffer: List[Tuple] = []
+
+#     def add(self, observation):
+#         if len(self.buffer) >= self.max_buffer_size:
+#             # randomly select an index
+#             index = random.randint(0, len(self.buffer) - 1)
+#             self.buffer[index] = observation
+#         else:
+#             self.buffer.append(observation)
+
+#     def sample(self):
+#         sample = []
+#         indices_selected = set()
+#         for i in range(self.sample_size):
+#             index = random.randint(0, len(self.buffer) - 1)
+#             while index in indices_selected:
+#                 index = random.randint(0, len(self.buffer) - 1)
+#             sample.append(self.buffer[index])
+#         return sample
+
+
+class Experience(NamedTuple):
+    old_state: Any
+    new_state: Any
+    action: Any
+    reward: float
+    is_terminal: bool
+
+class ReplayBuffer():
+    def __init__(self, max_capacity: int, state_shape_size: int, action_space_size: int):
+        self.max_capacity = max_capacity
+        self.counter = 0
+
+        self.old_state_buffer = np.zeros((max_capacity, state_shape_size))
+        self.new_state_buffer = np.zeros((max_capacity, state_shape_size))
+        self.action_buffer = np.zeros((max_capacity, action_space_size))
+        self.reward_buffer = np.zeros(max_capacity)
+        self.is_terminal_buffer = np.zeros(max_capacity)     
+    
+
+    def add(self, experience: Experience):
+        idx = self.counter % self.max_capacity
+        self.counter += 1
+
+        self.old_state_buffer[idx] = experience.old_state
+        self.new_state_buffer[idx] = experience.new_state
+        self.action_buffer[idx] = experience.action
+        self.reward_buffer[idx] = experience.reward
+        self.is_terminal_buffer[idx] = experience.is_terminal
+    
+
+    def get(self, batch_size: int):
+        valid_entries = min(self.counter, self.max_capacity)
+        indices = np.random.choice(list(range(valid_entries)), batch_size)
+        return self.old_state_buffer[indices], self.new_state_buffer[indices], self.action_buffer[indices], self.reward_buffer[indices], self.is_terminal_buffer[indices]
 
 class DDPGAgent(Agent):
 
-    hidden_size = (256, 256)
+    hidden_size = (400, 300)
 
     def __init__(
             self,
             env,
-            max_buffer_size: int = 100000,
-            replay_sample_size: int = 10,
-            actor_lr: float = 0.0001,
-            critic_lr: float = 0.0001,
+            max_buffer_size: int = 1000000,
+            replay_sample_size: int = 256,
+            actor_lr: float = 0.0003,
+            critic_lr: float = 0.0003,
             polyak: float = 0.995,
             gamma: float = 0.99,
-            training_frequency: int = 10,
-            num_train_episodes: int = 100000
+            training_frequency: int = 1,
+            num_train_episodes: int = 100000,
+            make_video: bool = False
     ):
         # set hyperparams
         self.max_buffer_size = max_buffer_size
@@ -70,6 +137,7 @@ class DDPGAgent(Agent):
         self.gamma = gamma
         self.training_frequency = training_frequency
         self.num_train_episodes = num_train_episodes
+        self.make_video = make_video
 
         # set up environment
         self.env = env
@@ -78,7 +146,7 @@ class DDPGAgent(Agent):
         act_limit_low: int = self.env.action_space.low[0]
         state_dim: int = self.env.observation_space.shape[0]
 
-        self.replay_buffer = ReplayBuffer(self.max_buffer_size, self.replay_sample_size)
+        self.replay_buffer = ReplayBuffer(self.max_buffer_size, state_dim, action_dim)
 
         # policy
         self.actor = ActorNetwork(
@@ -120,29 +188,27 @@ class DDPGAgent(Agent):
 
     def critic_loss(self, data):
         # extract observations from data
-        i = 0
         loss = 0
-        for observation in data:
-            current_state, action, reward, next_state, terminal = observation
-            pred = self.critic.get_q_value(current_state, action)
-            loss += (pred - (reward+ self.gamma*(1 - terminal)*self.target_critic.get_q_value(next_state, self.target_actor.get_action(next_state))))**2
-            i += 1
+        current_states, next_states, actions, rewards, terminals = data
+        current_states = torch.Tensor(current_states)
+        next_states = torch.Tensor(next_states)
+        actions = torch.Tensor(actions)
+        rewards = torch.Tensor(rewards).unsqueeze(1)
+        terminals = torch.Tensor(terminals).unsqueeze(1)
+
+        pred = self.critic.get_q_value(current_states, actions)
+        loss += (pred - (rewards+ self.gamma*(1 - terminals)*self.target_critic.get_q_value(next_states, self.target_actor.get_action(next_states))))**2
             
-        if (i != 0):
-            loss = loss / i
+        loss = torch.mean(loss)
 
         return loss
 
     def actor_loss(self, data):
-        i = 0
         loss = 0
-        for observation in data: 
-            current_state, action, reward, next_state, terminal = observation
-            loss += -(self.critic.get_q_value(current_state, self.actor.get_action(current_state)))
-            i += 1
+        current_states, next_states, actions, rewards, terminals = data
+        loss += -(self.critic.get_q_value(current_states, self.actor.get_action(current_states)))
 
-        if (i != 0):
-            loss = loss / i
+        loss = torch.mean(loss)
 
         return loss 
 
@@ -154,7 +220,8 @@ class DDPGAgent(Agent):
             rand_a = self.env.action_space.sample()
             new_s, reward, terminated, truncated, *args = self.env.step(rand_a)
             done = terminated or truncated
-            self.replay_buffer.add((last_s, rand_a, reward, new_s, done))
+            experience = Experience(last_s,new_s,rand_a,reward,done)
+            self.replay_buffer.add(experience)
             if done:
                 last_s, _ = self.env.reset()
             else:
@@ -167,6 +234,9 @@ class DDPGAgent(Agent):
         alive = 0
         lives = 0
         for episode in tqdm(range(self.num_train_episodes)):
+            if episode in {10000,100000,200000,500000,999999} and self.make_video:
+                save_path_str = "new_ddpg_ant_"+str(episode)+".mp4"
+                make_video_ddpg("Ant-v4",self,save_path_str)
 
             # action -> numpy array
             a = self.actor.get_action(last_s).detach().numpy()
@@ -177,7 +247,8 @@ class DDPGAgent(Agent):
             new_s, reward, terminated, truncated, *args = self.env.step(a)
             total_reward += reward
             done = terminated or truncated
-            self.replay_buffer.add((last_s, a, reward, new_s, done))
+            experience = Experience(last_s,new_s,a,reward,done)
+            self.replay_buffer.add(experience)
             if done:
                 last_s, _ = self.env.reset()
                 episodic_rewards.append(total_reward)
@@ -250,7 +321,7 @@ class DDPGAgent(Agent):
         # plt.show()
 
     def update_weights(self):
-        samples = self.replay_buffer.sample()
+        samples = self.replay_buffer.get(self.replay_sample_size)
         self.actor_optimiser.zero_grad()
         self.critic_optimiser.zero_grad()
 
@@ -297,7 +368,7 @@ class ActorNetwork(nn.Module):
         layers.append(nn.Linear(input_size, hidden_size[0])) # input layer
         layers.append(activation)
 
-        for i in range(0, len(hidden_size) - 2):
+        for i in range(0, len(hidden_size) - 1):
             layers.append(nn.Linear(hidden_size[i], hidden_size[i + 1]))
             layers.append(activation)
 
@@ -338,7 +409,7 @@ class CriticNetwork(nn.Module):
         layers.append(nn.Linear(input_size, hidden_size[0])) # input layer
         layers.append(activation)
 
-        for i in range(0, len(hidden_size) - 2):
+        for i in range(0, len(hidden_size) - 1):
             layers.append(nn.Linear(hidden_size[i], hidden_size[i+1]))
             layers.append(activation)
 
@@ -353,7 +424,7 @@ class CriticNetwork(nn.Module):
 
         state = torch.as_tensor(state, dtype=torch.float32)
         action = torch.as_tensor(action, dtype=torch.float32)
-        x = torch.concatenate((state, action))
+        x = torch.concatenate([state, action],dim=1)
         return self.forward(x)
     
 
@@ -381,10 +452,10 @@ def render_agent(env, agent, num_episodes=5):
     env.close()
 
 
-# if __name__ == "__main__":
+if __name__ == "__main__":
 
-#     env = gym.make("Ant-v4", render_mode=None)
-#     agent = DDPGAgent(env)
-#     agent.train(10000)
-#     env = gym.make("Ant-v4", render_mode="rgb_array")
-#     render_agent(env, agent, num_episodes=10)
+    env = gym.make("Ant-v4", render_mode=None)
+    agent = DDPGAgent(env)
+    agent.train(10000)
+    env = gym.make("Ant-v4", render_mode="rgb_array")
+    render_agent(env, agent, num_episodes=10)

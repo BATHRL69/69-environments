@@ -79,7 +79,7 @@ def make_video_ddpg(env,agent:ddpg.DDPGAgent,save_path):
     # Save frames as a video
     height, width, _ = frames[0].shape
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    video = cv2.VideoWriter(save_video_path, fourcc, 30, (width, height))
+    video = cv2.VideoWriter(save_path, fourcc, 30, (width, height))
 
     for frame in frames:
         video.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
@@ -87,39 +87,18 @@ def make_video_ddpg(env,agent:ddpg.DDPGAgent,save_path):
     video.release()
     env.close()
 
-# env = gym.make("Ant-v4", render_mode="rgb_array")
+env = gym.make("Ant-v4", render_mode="rgb_array")
 # train_agent = sac.SACAgent(env)
 # train_agent.load("sac_ant_1000000.data")
 # make_video(env,train_agent,"sac_ant_1000000_vid.mp4")
-
-
 # SAVE_PATH = "sac_ant_temp.data"
 # train_agent = sac.SACAgent(env)
 # # train_agent.train(num_timesteps=1_000_000, start_timesteps=10000)
 # train_agent.load(SAVE_PATH)
 
-# obs, info = env.reset()
-
-# for i in range(10_000):
-#     # action = train_agent.actor.sample(torch.Tensor([obs]))
-#     # obs, reward, done, trunacted ,info = env.step(action[0].detach().numpy()[0])
-#     action = train_agent.predict(torch.Tensor([obs]))
-#     obs, reward, done, trunacted ,info = env.step(action[0])
-#     img = env.render()
-#     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-#     cv2.imshow("Double Inverted Pendulum", img)
-
-#     if cv2.waitKey(1) & 0xFF == ord('q'):
-#         break
-    
-#     if done:
-#         obs, info = env.reset()
-
-# env.close()
 
 # np.save("sac_ant_brr_timesteps.npy",np.array(train_agent.timestep_list))
 # np.save("sac_ant_brr_rewards.npy",np.array(train_agent.reward_list))
-# np.save("sac_ant_brr_mean_rewards.npy",np.array(train_agent.mean_reward_list))
 
 # SAVE_PATH = "temp.data"
 # train_agent = sac.SACAgent(env)
@@ -132,24 +111,30 @@ def make_video_ddpg(env,agent:ddpg.DDPGAgent,save_path):
 # np.save("temp.npy", np.array(train_agent.reward_list))
 
 # DDPG
-# train_agent = ddpg.DDPGAgent(env,num_train_episodes=1_000_000)
-# train_agent.train(10000)
-# env.close()
-# timestep_list = ddpg.GLOBAL_TIMESTEPS
-# reward_list = ddpg.GLOBAL_REWARDS
-# make_video_ddpg(env,train_agent,"ddpg_ant_1000000_3.mp4")
-# np.save("ddpg_ant_timesteps_1000000_3.npy", np.array(timestep_list))
-# np.save("ddpg_ant_rewards_1000000_3.npy", np.array(reward_list))
+# for i in range(3):
+#     train_agent = ddpg.DDPGAgent(env,num_train_episodes=1_000_0,actor_lr = 0.0003,critic_lr=0.0003,training_frequency=1,replay_sample_size=256,max_buffer_size=1000000)
+#     train_agent.train(25000)
+#     timestep_list = ddpg.GLOBAL_TIMESTEPS
+#     reward_list = ddpg.GLOBAL_REWARDS
+#     make_video_ddpg(env,train_agent,"new_ddpg_ant_1000000_"+str(i)+".mp4")
+#     np.save("new_ddpg_ant_timesteps_1000000_"+str(i)+".npy", np.array(timestep_list))
+#     np.save("new_ddpg_ant_rewards_1000000_"+str(i)+".npy", np.array(reward_list))
+#     ddpg.GLOBAL_TIMESTEPS = []
+#     ddpg.GLOBAL_REWARDS = []
 
 #TD3
-# train_agent = td3.TD3Agent(env,num_train_episodes=1_000_000,actor_lr=0.0003,critic_lr=0.0003,training_frequency=1,actor_update_frequency=1)
-# train_agent.train(10000)
-# timestep_list = td3.GLOBAL_TIMESTEPS
-# reward_list = td3.GLOBAL_REWARDS
-# make_video_ddpg(env,train_agent,"td3_ant_1000000_newlr.mp4")
-# plot(timestep_list,reward_list)
-# np.save("td3_ant_timesteps_1000000_newlr.npy", np.array(timestep_list))
-# np.save("td3_ant_rewards_1000000_newlr.npy", np.array(reward_list))
+# I've made it so that the videos will generate on their own, we have one for 10k,100k,500k,1m
+# Hardcoded in td3 code
+# for i in range(3):
+#     train_agent = td3.TD3Agent(env,num_train_episodes=1_000_0,actor_lr=0.0003,critic_lr=0.0003,training_frequency=1,actor_update_frequency=2,replay_sample_size=256,max_buffer_size=1000000)
+#     train_agent.train(start_steps = 25000)
+#     timestep_list = td3.GLOBAL_TIMESTEPS
+#     reward_list = td3.GLOBAL_REWARDS
+#     make_video_ddpg(env,train_agent,"new_td3_ant_1000000_"+str(i)+".mp4")
+#     np.save("new_td3_ant_timesteps_1000000_"+str(i)+".npy", np.array(timestep_list))
+#     np.save("new_td3_ant_rewards_1000000_"+str(i)+".npy", np.array(reward_list))
+#     td3.GLOBAL_TIMESTEPS = []
+#     td3.GLOBAL_REWARDS = []
 
 # PPO
 # train_agent = ppo.PPOAgent(env, observation_space=27, action_space=8, std=0.3)

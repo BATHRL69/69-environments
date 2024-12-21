@@ -12,6 +12,30 @@ from agent import Agent
 from typing import NamedTuple, Any
 
 
+def make_video_sample(env,agent,save_path):
+    frames = []
+    state, _ = env.reset()
+    done = False
+    truncated = False
+
+    while not (done or truncated):
+        frame = env.render()
+        frames.append(frame)
+
+        action = agent.actor.sample(torch.Tensor([state]))
+        state, reward, done, truncated ,info = env.step(action[0].detach().numpy()[0])
+
+    # Save frames as a video
+    height, width, _ = frames[0].shape
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    video = cv2.VideoWriter(save_path, fourcc, 30, (width, height))
+
+    for frame in frames:
+        video.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+
+    video.release()
+
+
 class Experience(NamedTuple):
     old_state: Any
     new_state: Any
@@ -158,7 +182,7 @@ class SACValueNetwork(nn.Module):
 
 ## WORKING AGENT
 class SACAgent(Agent):
-    def __init__(self, env: gym.Env, update_threshold: int=1, batch_size: int=256, lr: float=3e-4, gamma: float=0.99, polyak=0.995, fixed_alpha=None):
+    def __init__(self, env: gym.Env, update_threshold: int=1, batch_size: int=256, lr: float=3e-4, gamma: float=0.99, polyak=0.995, fixed_alpha=None,reward_scale:float=5, make_video:float=False):
         super(SACAgent, self).__init__(env)
 
         # line 1 of pseudocode
@@ -168,11 +192,13 @@ class SACAgent(Agent):
         self.updates = 0
 
         # model hyperparams
+        self.reward_scale = reward_scale
         self.batch_size = batch_size
         self.fixed_alpha = fixed_alpha
         self.lr = lr
         self.gamma = gamma
         self.polyak = polyak
+        self.make_video = make_video
 
         observation_space_shape = env.observation_space._shape[0]
         action_space_shape = env.action_space._shape[0]
@@ -230,6 +256,11 @@ class SACAgent(Agent):
 
         # line 3 of pseudocode
         while True:
+            
+            if timestep in {10000,100000,200000,500000,999999} and self.make_video:
+                save_path_str = "new_sac_ant_"+str(timestep)+".mp4"
+                make_video_sample("Ant-v4",self,save_path_str)
+
             timestep += 1
             self.persistent_timesteps += 1
 
@@ -272,7 +303,7 @@ class SACAgent(Agent):
         old_states = torch.tensor(old_states, dtype=torch.float32)
         new_states = torch.tensor(new_states, dtype=torch.float32)
         actions = torch.tensor(actions, dtype=torch.float32)
-        rewards = torch.tensor(rewards, dtype=torch.float32).unsqueeze(1)
+        rewards = torch.tensor(rewards, dtype=torch.float32).unsqueeze(1)*self.reward_scale
         terminals = torch.tensor(terminals, dtype=torch.float32).unsqueeze(1)
 
         # line 12 of pseudocode
@@ -351,40 +382,8 @@ class SACAgent(Agent):
                 self.critics_optimiser.load_state_dict(critics_optim_dict)
 
 
-# env = gym.make("Ant-v4", render_mode="rgb_array")
-# SAVE_PATH = "sac_ant2.data"
-
-# train_agent = SACAgent(env)
-# train_agent.load(SAVE_PATH)
-# agent.train(num_timesteps=2_000, start_timesteps=1000)
-# agent.save(SAVE_PATH)
-# train_agent.render()
-
-# obs, info = env.reset()
-
-# for i in range(10_000):
-#     action = train_agent.actor.sample(torch.Tensor([obs]))
-#     obs, reward, done, trunacted ,info = env.step(action[0].detach().numpy()[0])
-#     img = env.render()
-#     print(img)
-#     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-#     cv2.imshow("Double Inverted Pendulum", img)
-
-#     if cv2.waitKey(1) & 0xFF == ord('q'):
-#         break
-    
-#     if done:
-#         obs, info = env.reset()
-
-# env.close()
-
-# env = gym.make("Humanoid-v4", render_mode="rgb_array")
-# SAVE_PATH = "sac_humanoid.data"
-
-# agent = SACAgent(env)
-# agent.load(SAVE_PATH)
-# agent.train(num_timesteps=100000, start_timesteps=0)
-# agent.save(SAVE_PATH)
-# agent.render()
-
-# env.close()
+if __name__ == "__main__":
+    env = gym.make("Ant-v4", render_mode="rgb_array")
+    agent = SACAgent(env)
+    agent.train(num_timesteps=2_000, start_timesteps=1000)
+    agent.render()
