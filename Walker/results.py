@@ -3,7 +3,17 @@ import gymnasium as gym
 import numpy as np
 import cv2
 import torch
-from plots import plot
+import matplotlib.pyplot as plt
+
+def plot(timesteps,rewards):
+    plt.figure(figsize=(10, 6))
+    plt.plot(timesteps, rewards, label="reward", color="red")
+    plt.xlabel("Timesteps")
+    plt.ylabel("Rewards")
+    plt.title("Rewards vs Timesteps")
+    plt.legend()
+    plt.grid()
+    plt.show()
 
 def make_video_sample(env,agent,save_path):
     frames = []
@@ -78,34 +88,15 @@ def make_video_ddpg(env,agent:ddpg.DDPGAgent,save_path):
 
 env = gym.make("Ant-v4", render_mode="rgb_array")
 
-# SAVE_PATH = "sac_ant_1000000_2.data"
+# SAVE_PATH = "temp.data"
 # train_agent = sac.SACAgent(env)
-# train_agent.train(num_timesteps=1_000_000, start_timesteps=10000)
+# train_agent.train(num_timesteps=1_000_00, start_timesteps=1_000_00)
 # train_agent.save(SAVE_PATH)
 # train_agent.load(SAVE_PATH)
 # train_agent.render()
-# make_video(env,train_agent,"sgrgr.mp4")
-# obs, info = env.reset()
-# for i in range(10_000):
-#     # THIS DOESNT WORK
-#     # action = train_agent.predict(torch.Tensor([obs]))[0]
-#     # obs, reward, done, trunacted ,info = env.step(action)
-#     # THIS WORKS
-#     action = train_agent.actor.sample(torch.Tensor([obs]))
-#     obs, reward, done, trunacted ,info = env.step(action[0].detach().numpy()[0])
-#     img = env.render()
-    
-#     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-#     cv2.imshow("Double Inverted Pendulum", img)
-
-#     if cv2.waitKey(1) & 0xFF == ord('q'):
-#         break
-    
-#     if done:
-#         obs, info = env.reset()
-
-# np.save("sac_ant_timesteps_1000000_3.npy", np.array(train_agent.timestep_list))
-# np.save("sac_ant_rewards_1000000_3.npy", np.array(train_agent.reward_list))
+# make_video_sample(env,train_agent,"sgrgr.mp4")
+# np.save("temp.npy", np.array(train_agent.timestep_list))
+# np.save("temp.npy", np.array(train_agent.reward_list))
 
 # DDPG
 # train_agent = ddpg.DDPGAgent(env,num_train_episodes=1_000_000)
@@ -113,32 +104,30 @@ env = gym.make("Ant-v4", render_mode="rgb_array")
 # env.close()
 # timestep_list = ddpg.GLOBAL_TIMESTEPS
 # reward_list = ddpg.GLOBAL_REWARDS
-# make_video_ddpg(env,train_agent,"ddpg_ant_1000000.mp4")
-# plot(timestep_list,reward_list)
-# np.save("ddpg_ant_timesteps_1000000.npy", np.array(timestep_list))
-# np.save("ddpg_ant_rewards_1000000.npy", np.array(reward_list))
+# make_video_ddpg(env,train_agent,"ddpg_ant_1000000_3.mp4")
+# np.save("ddpg_ant_timesteps_1000000_3.npy", np.array(timestep_list))
+# np.save("ddpg_ant_rewards_1000000_3.npy", np.array(reward_list))
 
 #TD3
-# train_agent = td3.TD3Agent(env,num_train_episodes=1_000_000)
+# train_agent = td3.TD3Agent(env,num_train_episodes=1_000_000,actor_lr=0.0003,critic_lr=0.0003,training_frequency=1,actor_update_frequency=1)
 # train_agent.train(10000)
-# env.close()
 # timestep_list = td3.GLOBAL_TIMESTEPS
 # reward_list = td3.GLOBAL_REWARDS
-# make_video_ddpg(env,train_agent,"td3_ant_1000000_1.mp4")
+# make_video_ddpg(env,train_agent,"td3_ant_1000000_newlr.mp4")
 # plot(timestep_list,reward_list)
-# np.save("td3_ant_timesteps_1000000_1.npy", np.array(timestep_list))
-# np.save("td3_ant_rewards_1000000_1.npy", np.array(reward_list))
+# np.save("td3_ant_timesteps_1000000_newlr.npy", np.array(timestep_list))
+# np.save("td3_ant_rewards_1000000_newlr.npy", np.array(reward_list))
 
 # PPO
-train_agent = ppo.PPOAgent(env, observation_space=27, action_space=8, std=0.3)
-train_agent.efficient_train(1_000_000)
-timestep_list_ppo = ppo.GLOBAL_TIMESTEPS
-reward_list_ppo = ppo.GLOBAL_REWARDS
-# make_video_predict(env,train_agent,"ppo_1000000_temp.mp4")
-# env.close()
+# train_agent = ppo.PPOAgent(env, observation_space=27, action_space=8, std=0.3)
+# train_agent.efficient_train(1_000_000)
+# timestep_list_ppo = ppo.GLOBAL_TIMESTEPS
+# reward_list_ppo = ppo.GLOBAL_REWARDS
+# np.save("ppo_timesteps_1000000_3.npy", np.array(timestep_list_ppo))
+# np.save("ppo_rewards_1000000_3.npy", np.array(reward_list_ppo))
+# # make_video_predict(env,train_agent,"ppo_1000000_vid_2.mp4")
+# # env.close()
 
-np.save("ppo_timesteps_1000000_2.npy", np.array(timestep_list_ppo))
-np.save("ppo_rewards_1000000_2.npy", np.array(reward_list_ppo))
 # train_agent = ppo.PPOAgent(env, observation_space=27, action_space=8, std=0.6)
 # train_agent.efficient_train(100_000)
 # timestep_list_ppo = ppo.GLOBAL_TIMESTEPS
