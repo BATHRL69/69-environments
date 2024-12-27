@@ -36,11 +36,11 @@ class PPOPolicyNetwork(nn.Module):
         super(PPOPolicyNetwork, self).__init__()
 
         self.network = nn.Sequential(
-            nn.Linear(observation_space, 32),
+            nn.Linear(observation_space, 256),
             nn.ReLU(),
-            nn.Linear(32, 32),
+            nn.Linear(256, 128),
             nn.ReLU(),
-            nn.Linear(32, action_space),
+            nn.Linear(128, action_space),
         )
         self.max_std = std
         self.log_std = np.log(std)
@@ -57,6 +57,7 @@ class PPOPolicyNetwork(nn.Module):
             self.max_std
             - (self.max_std - min_std) * (timesteps_through / total_timesteps)
         ) + 0.0001  # Ensure it never gets to 0, this will give us nans
+        new_std = 0.2
         self.log_std = torch.tensor(np.log(new_std))
 
     def get_distribution(self, state):
@@ -123,11 +124,11 @@ class PPOValueNetwork(nn.Module):
     ):
         super(PPOValueNetwork, self).__init__()
         self.network = nn.Sequential(
-            nn.Linear(observation_space, 32),
+            nn.Linear(observation_space, 256),
             nn.Tanh(),
-            nn.Linear(32, 32),
+            nn.Linear(256, 128),
             nn.Tanh(),
-            nn.Linear(32, 1),
+            nn.Linear(128, 1),
         )
 
     def forward(self, state):
@@ -143,13 +144,13 @@ class PPOAgent(Agent):
         observation_space=115,  # Default from ant-v4
         action_space=8,
         std=0.4,
-        learning_rate=1e-5,
-        weight_decay=0,
+        learning_rate=3e-4,
+        weight_decay=1e-5,
         lambda_gae=0.95,
         minibatch_size=4096,
         num_trajectories=10,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
         num_epochs=3,
-        entropy_coef=0.01,
+        entropy_coef=0.0,
     ):
         super(PPOAgent, self).__init__(env)
 
@@ -337,10 +338,9 @@ class PPOAgent(Agent):
         dist = self.policy_network.get_distribution(states)
         entropy = dist.entropy().mean()
         policy_loss = policy_loss - self.entropy_coef * entropy
-
+        torch.nn.utils.clip_grad_norm_(self.policy_network.parameters(), max_norm=1.0)
         self.policy_optimiser.zero_grad()
         policy_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.policy_network.parameters(), max_norm=1.0)
 
         self.policy_optimiser.step()
 
@@ -380,10 +380,10 @@ class PPOAgent(Agent):
         rewards_to_go = self.state_action_values_mc(rewards)
         # Line 5 in Pseudocode
         # Compute advantage estimates
-        # advantage_estimates_old = self.advantage_estimates_mc(
-        #     states, rewards
-        # )  # TODO ONLY NEED ONE OF THESE
-        advantage_estimates = self.advantage_estimates_gae(states, rewards)
+        advantage_estimates = self.advantage_estimates_mc(
+            states, rewards
+        )  # TODO ONLY NEED ONE OF THESE
+        # advantage_estimates = self.advantage_estimates_gae(states, rewards)
         for _ in range(self.num_epochs):
             for current_batch_start in range(0, total_timesteps, self.minibatch_size):
                 current_batch_end = current_batch_start + self.minibatch_size
@@ -519,11 +519,11 @@ class DPOAgent(PPOAgent):
         observation_space=115,  # Default from ant-v4
         action_space=8,
         std=0.1,
-        learning_rate=1e-5,
+        learning_rate=1e-4,
         weight_decay=0,
         lambda_gae=0.95,
-        minibatch_size=4096,
-        num_trajectories=1,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
+        minibatch_size=2048,
+        num_trajectories=5,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
         num_epochs=2,
         entropy_coef=0.01,
         alpha=2,
