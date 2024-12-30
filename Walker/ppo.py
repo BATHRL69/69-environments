@@ -38,6 +38,8 @@ class PPOPolicyNetwork(nn.Module):
         self.network = nn.Sequential(
             nn.Linear(observation_space, 256),
             nn.ReLU(),
+            nn.Linear(256, 25),
+            nn.ReLU(),
             nn.Linear(256, 128),
             nn.ReLU(),
             nn.Linear(128, action_space),
@@ -52,12 +54,12 @@ class PPOPolicyNetwork(nn.Module):
             timesteps_through (int): Amount of timesteps through at curent point in training
             total_timesteps (int): Total timesteps for training
         """
-        min_std = 0.01
+        min_std = 0.05
         new_std = (
             self.max_std
             - (self.max_std - min_std) * (timesteps_through / total_timesteps)
         ) + 0.0001  # Ensure it never gets to 0, this will give us nans
-        new_std = 0.2
+        new_std = 0.25
         self.log_std = torch.tensor(np.log(new_std))
 
     def get_distribution(self, state):
@@ -125,9 +127,11 @@ class PPOValueNetwork(nn.Module):
         super(PPOValueNetwork, self).__init__()
         self.network = nn.Sequential(
             nn.Linear(observation_space, 256),
-            nn.Tanh(),
+            nn.ReLU(),
+            nn.Linear(256, 25),
+            nn.ReLU(),
             nn.Linear(256, 128),
-            nn.Tanh(),
+            nn.ReLU(),
             nn.Linear(128, 1),
         )
 
@@ -139,7 +143,7 @@ class PPOAgent(Agent):
     def __init__(
         self,
         env,
-        epsilon=0.3,
+        epsilon=0.2,
         gamma=0.99,
         observation_space=115,  # Default from ant-v4
         action_space=8,
@@ -147,7 +151,7 @@ class PPOAgent(Agent):
         learning_rate=3e-4,
         weight_decay=1e-5,
         lambda_gae=0.95,
-        minibatch_size=4096,
+        minibatch_size=512,
         num_trajectories=10,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
         num_epochs=3,
         entropy_coef=0.0,
@@ -481,6 +485,7 @@ class PPOAgent(Agent):
         Returns:
             torch.Tensor: The best action to take in state S
         """
+        self.policy_network.log_std = torch.tensor(np.log(0.2))
         with torch.no_grad():
             action, _ = self.policy_network.get_action(state)
         return action.detach().numpy()
@@ -522,8 +527,8 @@ class DPOAgent(PPOAgent):
         learning_rate=1e-4,
         weight_decay=0,
         lambda_gae=0.95,
-        minibatch_size=2048,
-        num_trajectories=5,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
+        minibatch_size=512,
+        num_trajectories=10,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
         num_epochs=2,
         entropy_coef=0.01,
         alpha=2,
