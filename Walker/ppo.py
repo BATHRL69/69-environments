@@ -38,11 +38,11 @@ class PPOPolicyNetwork(nn.Module):
         self.network = nn.Sequential(
             nn.Linear(observation_space, 256),
             nn.ReLU(),
-            nn.Linear(256, 25),
+            nn.Linear(256, 256),
             nn.ReLU(),
-            nn.Linear(256, 128),
+            nn.Linear(256, 256),
             nn.ReLU(),
-            nn.Linear(128, action_space),
+            nn.Linear(256, action_space),
         )
         self.max_std = std
         self.log_std = np.log(std)
@@ -128,11 +128,11 @@ class PPOValueNetwork(nn.Module):
         self.network = nn.Sequential(
             nn.Linear(observation_space, 256),
             nn.ReLU(),
-            nn.Linear(256, 25),
+            nn.Linear(256, 256),
             nn.ReLU(),
-            nn.Linear(256, 128),
+            nn.Linear(256, 256),
             nn.ReLU(),
-            nn.Linear(128, 1),
+            nn.Linear(256, 1),
         )
 
     def forward(self, state):
