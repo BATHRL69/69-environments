@@ -154,7 +154,7 @@ class PPOAgent(Agent):
         minibatch_size=512,
         num_trajectories=10,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
         num_epochs=3,
-        entropy_coef=0.0,
+        entropy_coef=0.01,
     ):
         super(PPOAgent, self).__init__(env)
 
@@ -524,12 +524,12 @@ class DPOAgent(PPOAgent):
         observation_space=115,  # Default from ant-v4
         action_space=8,
         std=0.1,
-        learning_rate=1e-4,
+        learning_rate=3e-4,
         weight_decay=0,
         lambda_gae=0.95,
         minibatch_size=512,
         num_trajectories=10,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
-        num_epochs=2,
+        num_epochs=3,
         entropy_coef=0.01,
         alpha=2,
         beta=0.6,
