@@ -5,7 +5,8 @@ import cv2
 import torch
 import matplotlib.pyplot as plt
 
-def plot(timesteps,rewards):
+
+def plot(timesteps, rewards):
     plt.figure(figsize=(10, 6))
     plt.plot(timesteps, rewards, label="reward", color="red")
     plt.xlabel("Timesteps")
@@ -15,7 +16,8 @@ def plot(timesteps,rewards):
     plt.grid()
     plt.show()
 
-def make_video_sample(env,agent,save_path):
+
+def make_video_sample(env, agent, save_path):
     frames = []
     state, _ = env.reset()
     done = False
@@ -26,11 +28,11 @@ def make_video_sample(env,agent,save_path):
         frames.append(frame)
 
         action = agent.actor.sample(torch.Tensor([state]))
-        state, reward, done, truncated ,info = env.step(action[0].detach().numpy()[0])
+        state, reward, done, truncated, info = env.step(action[0].detach().numpy()[0])
 
     # Save frames as a video
     height, width, _ = frames[0].shape
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     video = cv2.VideoWriter(save_path, fourcc, 30, (width, height))
 
     for frame in frames:
@@ -38,7 +40,8 @@ def make_video_sample(env,agent,save_path):
 
     video.release()
 
-def make_video_predict(env,agent,save_path):
+
+def make_video_predict(env, agent, save_path):
     frames = []
     state, _ = env.reset()
     done = False
@@ -49,11 +52,11 @@ def make_video_predict(env,agent,save_path):
         frames.append(frame)
 
         action = agent.predict(torch.Tensor([state]))
-        state, reward, done, truncated ,info = env.step(action[0])
+        state, reward, done, truncated, info = env.step(action[0])
 
     # Save frames as a video
     height, width, _ = frames[0].shape
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     video = cv2.VideoWriter(save_path, fourcc, 30, (width, height))
 
     for frame in frames:
@@ -61,7 +64,8 @@ def make_video_predict(env,agent,save_path):
 
     video.release()
 
-def make_video_ddpg(env,agent:ddpg.DDPGAgent,save_path):
+
+def make_video_ddpg(env, agent: ddpg.DDPGAgent, save_path):
     frames = []
     state, _ = env.reset()
     done = False
@@ -73,12 +77,12 @@ def make_video_ddpg(env,agent:ddpg.DDPGAgent,save_path):
 
         # action = agent.predict(torch.Tensor(state))
         # state, reward, done, truncated, info = env.step(action)
-        action = agent.actor.get_action(torch.Tensor([state]),test=False)
-        state, reward, done, truncated ,info = env.step(action[0].detach().numpy())
+        action = agent.actor.get_action(torch.Tensor([state]), test=False)
+        state, reward, done, truncated, info = env.step(action[0].detach().numpy())
 
     # Save frames as a video
     height, width, _ = frames[0].shape
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     video = cv2.VideoWriter(save_path, fourcc, 30, (width, height))
 
     for frame in frames:
@@ -86,6 +90,7 @@ def make_video_ddpg(env,agent:ddpg.DDPGAgent,save_path):
 
     video.release()
     env.close()
+
 
 env = gym.make("Ant-v4", render_mode="rgb_array")
 # train_agent = sac.SACAgent(env)
@@ -122,7 +127,7 @@ env = gym.make("Ant-v4", render_mode="rgb_array")
 #     ddpg.GLOBAL_TIMESTEPS = []
 #     ddpg.GLOBAL_REWARDS = []
 
-#TD3
+# TD3
 # I've made it so that the videos will generate on their own, we have one for 10k,100k,500k,1m
 # Hardcoded in td3 code
 # for i in range(3):
@@ -137,14 +142,20 @@ env = gym.make("Ant-v4", render_mode="rgb_array")
 #     td3.GLOBAL_REWARDS = []
 
 # PPO
-# train_agent = ppo.PPOAgent(env, observation_space=27, action_space=8, std=0.3)
-# train_agent.efficient_train(1_000_000)
-# timestep_list_ppo = ppo.GLOBAL_TIMESTEPS
-# reward_list_ppo = ppo.GLOBAL_REWARDS
-# np.save("ppo_timesteps_1000000_3.npy", np.array(timestep_list_ppo))
-# np.save("ppo_rewards_1000000_3.npy", np.array(reward_list_ppo))
-# # make_video_predict(env,train_agent,"ppo_1000000_vid_2.mp4")
-# # env.close()
+env = gym.make(
+    "Ant-v4",
+    render_mode="rgb_array",
+    healthy_reward=0.1,
+)
+
+train_agent = ppo.PPOAgent(env, observation_space=27, action_space=8, std=0.3)
+train_agent.efficient_train(1_000_000)
+timestep_list_ppo = ppo.GLOBAL_TIMESTEPS
+reward_list_ppo = ppo.GLOBAL_REWARDS
+np.save("ppo_timesteps_1000000_3.npy", np.array(timestep_list_ppo))
+np.save("ppo_rewards_1000000_3.npy", np.array(reward_list_ppo))
+make_video_predict(env, train_agent, "ppo_1000000_vid_2.mp4")
+env.close()
 
 # train_agent = ppo.PPOAgent(env, observation_space=27, action_space=8, std=0.6)
 # train_agent.efficient_train(100_000)
