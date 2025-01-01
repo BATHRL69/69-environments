@@ -154,6 +154,7 @@ timestep_list_ppo = ppo.GLOBAL_TIMESTEPS
 reward_list_ppo = ppo.GLOBAL_REWARDS
 np.save("ppo_timesteps_1000000_3.npy", np.array(timestep_list_ppo))
 np.save("ppo_rewards_1000000_3.npy", np.array(reward_list_ppo))
+train_agent.policy_network.max_std = 0.1
 make_video_predict(env, train_agent, "ppo_1000000_vid_2.mp4")
 env.close()
 
