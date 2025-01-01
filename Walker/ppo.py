@@ -442,7 +442,7 @@ class PPOAgent(Agent):
         """
         timesteps = 0
         episodes = 0
-        torch.autograd.set_detect_anomaly(True)
+        # torch.autograd.set_detect_anomaly(True)
         while timesteps < num_iterations:
             self.policy_network.update_std(timesteps, num_iterations)
             elapsed_timesteps, reward = (

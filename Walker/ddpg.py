@@ -50,32 +50,6 @@ def make_video_ddpg(env_name,agent,save_path):
     video.release()
     video_env.close()
 
-# class ReplayBuffer:
-
-#     def __init__(self, max_buffer_size, sample_size):
-#         self.max_buffer_size = max_buffer_size
-#         self.sample_size = sample_size
-#         self.buffer: List[Tuple] = []
-
-#     def add(self, observation):
-#         if len(self.buffer) >= self.max_buffer_size:
-#             # randomly select an index
-#             index = random.randint(0, len(self.buffer) - 1)
-#             self.buffer[index] = observation
-#         else:
-#             self.buffer.append(observation)
-
-#     def sample(self):
-#         sample = []
-#         indices_selected = set()
-#         for i in range(self.sample_size):
-#             index = random.randint(0, len(self.buffer) - 1)
-#             while index in indices_selected:
-#                 index = random.randint(0, len(self.buffer) - 1)
-#             sample.append(self.buffer[index])
-#         return sample
-
-
 class Experience(NamedTuple):
     old_state: Any
     new_state: Any
@@ -113,7 +87,7 @@ class ReplayBuffer():
 
 class DDPGAgent(Agent):
 
-    hidden_size = (400, 300)
+    hidden_size = (256, 256)
 
     def __init__(
             self,
@@ -397,11 +371,10 @@ class ActorNetwork(nn.Module):
         assert a.dtype == torch.float32, f"Expected tensor of dtype float32, but got {a.dtype}"
         return a
 
-
 class CriticNetwork(nn.Module):
         
     def __init__(self, hidden_size, activation, action_dim, state_dim):
-        super().__init__()
+        super().__init__asd()
         input_size = action_dim + state_dim
         output_size = 1 # critic network just outputs a value
         layers = []
@@ -427,7 +400,6 @@ class CriticNetwork(nn.Module):
         x = torch.concatenate([state, action],dim=1)
         return self.forward(x)
     
-
 def render_agent(env, agent, num_episodes=5):
     """
     Visualize the trained agent in the environment.
@@ -450,7 +422,6 @@ def render_agent(env, agent, num_episodes=5):
             state = next_state
         print(f"Total reward for episode {episode + 1}: {total_reward}")
     env.close()
-
 
 if __name__ == "__main__":
 
