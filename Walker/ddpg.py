@@ -14,9 +14,6 @@ from agent import Agent
 
 random.seed(0)
 
-# https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/algos/pytorch/ddpg/core.py
-# https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/algos/pytorch/ddpg/ddpg.py
-
 class ReplayBuffer:
 
     def __init__(self, max_buffer_size, sample_size):
@@ -51,8 +48,8 @@ class DDPGAgent(Agent):
             env,
             max_buffer_size: int = 100000,
             replay_sample_size: int = 10,
-            actor_lr: float = 0.0001,
-            critic_lr: float = 0.0001,
+            actor_lr: float = 0.001,
+            critic_lr: float = 0.001,
             polyak: float = 0.995,
             gamma: float = 0.99,
             training_frequency: int = 10,
@@ -86,14 +83,15 @@ class DDPGAgent(Agent):
             act_limit_high,
             act_limit_low
         )
+
         self.actor_optimiser = Adam(self.actor.parameters(), lr = self.actor_lr)
 
         # q-value function
         self.critic = CriticNetwork(
             self.hidden_size,
             ReLU(),
-            state_dim,
-            action_dim
+            action_dim,
+            state_dim
         )
         self.critic_optimiser = Adam(self.critic.parameters(), lr = self.critic_lr)
 
@@ -121,8 +119,8 @@ class DDPGAgent(Agent):
         loss = 0
         for observation in data:
             current_state, action, reward, next_state, terminal = observation
-            pred = self.critic.get_q_value(current_state, action)
-            loss += (pred - (reward+ self.gamma*(1 - terminal)*self.target_critic.get_q_value(next_state, self.target_actor.get_action(next_state))))**2
+            pred = self.critic.predict(current_state, action)
+            loss += (pred - (reward+ self.gamma*(1 - terminal)*self.target_critic.predict(next_state, self.target_actor.predict(next_state))))**2
             i += 1
             
         if (i != 0):
@@ -135,7 +133,7 @@ class DDPGAgent(Agent):
         loss = 0
         for observation in data: 
             current_state, action, reward, next_state, terminal = observation
-            loss += -(self.critic.get_q_value(current_state, self.actor.get_action(current_state)))
+            loss += -(self.critic.predict(current_state, self.actor.predict(current_state)))
             i += 1
 
         if (i != 0):
@@ -166,7 +164,7 @@ class DDPGAgent(Agent):
         for episode in tqdm(range(self.num_train_episodes)):
 
             # action -> numpy array
-            a = self.actor.get_action(last_s).detach().numpy()
+            a = self.actor.predict(last_s).detach().numpy()
 
             # NUMPY ARRAY
             assert isinstance(a, np.ndarray), f"Expected a NumPy array, but got {type(a)}"
@@ -177,8 +175,7 @@ class DDPGAgent(Agent):
             self.replay_buffer.add((last_s, a, reward, new_s, done))
             if done:
                 last_s, _ = self.env.reset()
-                episodic_rewards.append(total_reward)
-                # print(lives, "attempt:\n", "died after ", alive, " steps", "total reward", total_reward, "\n")
+                
                 total_reward = 0
                 alive = 0
                 lives += 1
@@ -190,41 +187,14 @@ class DDPGAgent(Agent):
             if episode % self.training_frequency == 0:
                 self.update_weights()
 
-        episodic_rewards = []
+            episodic_rewards.append(total_reward)
 
-        total_reward = 0
-        print("START TESTING")
-        alive = 0
-        lives = 0
-        self.critic_losses = []
-        self.actor_losses = []
+        print(len(episodic_rewards))
 
-        for episode in tqdm(range(1000)):
-
-            # action -> numpy array
-            a = self.actor.get_action(last_s, test=True).detach().numpy()
-
-            # NUMPY ARRAY
-            assert isinstance(a, np.ndarray), f"Expected a NumPy array, but got {type(a)}"
-
-            new_s, reward, terminated, truncated, *args = self.env.step(a)
-            total_reward += reward
-            done = terminated or truncated
-            #self.replay_buffer.add((last_s, a, reward, new_s, done))
-            if done:
-                last_s, _ = self.env.reset()
-                episodic_rewards.append(total_reward)
-                total_reward = 0
-                alive = 0
-                lives += 1
-                
-            else:
-                alive += 1
-                last_s = new_s
 
         
         # Plot the episodic curve
-        plt.plot(range(len(episodic_rewards)), episodic_rewards, label="Episodic rewards")
+        plt.plot(range(len(episodic_rewards)), episodic_rewards, label="Timestep rewards")
         plt.xlabel("Episodes")
         plt.ylabel("Total reward")
         plt.legend()
@@ -269,15 +239,12 @@ class DDPGAgent(Agent):
         for parameter in self.critic.parameters():
             parameter.requires_grad = True
 
-        # polyak averaging -> actor params
-        for actor_p, target_actor_p in zip(self.actor.parameters(), self.target_actor.parameters()):
-            target_actor_p.data.mul_(self.polyak)
-            target_actor_p.data.add_((1 - self.polyak) * actor_p.data)
+        # polyak target network update
+        for p, target_p in zip(self.actor.parameters(), self.target_actor.parameters()):
+            target_p.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_p.data)
 
-        # polyak averaging -> critic params
-        for critic_p, target_critic_p in zip(self.critic.parameters(), self.target_critic.parameters()):
-            target_critic_p.data.mul_(self.polyak)
-            target_critic_p.data.add_((1 - self.polyak) * critic_p.data)
+        for p, target_p in zip(self.critic.parameters(), self.target_critic.parameters()):
+            target_p.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_p.data)
 
 class ActorNetwork(nn.Module):
 
@@ -309,7 +276,7 @@ class ActorNetwork(nn.Module):
         return scaled_output
     
 
-    def get_action(self, state, test=False):
+    def predict(self, state, test=False):
         noise_rate = 0.1
         a = self.forward(torch.as_tensor(state, dtype=torch.float32))
 
@@ -344,11 +311,11 @@ class CriticNetwork(nn.Module):
     def forward(self, x):
         return self.network(x)
     
-    def get_q_value(self, state, action):
+    def predict(self, state, action):
 
         state = torch.as_tensor(state, dtype=torch.float32)
         action = torch.as_tensor(action, dtype=torch.float32)
-        x = torch.concatenate((state, action))
+        x = torch.concatenate((action, state))
         return self.forward(x)
     
 
@@ -378,8 +345,8 @@ def render_agent(env, agent, num_episodes=5):
 
 if __name__ == "__main__":
 
-    env = gym.make("Ant-v5", render_mode=None)
-    agent = DDPGAgent(env)
+    env = gym.make("Ant-v4", render_mode=None)
+    agent = DDPGAgent(env, num_train_episodes=100000)
     agent.train()
-    env = gym.make("Ant-v5", render_mode="human")
+    env = gym.make("Ant-v4", render_mode="human")
     render_agent(env, agent, num_episodes=10)
