@@ -40,14 +40,12 @@ def make_video_sample(env_name,agent,save_path):
     video.release()
     video_env.close()
 
-
 class Experience(NamedTuple):
     old_state: Any
     new_state: Any
     action: Any
     reward: float
     is_terminal: bool
-
 
 class ReplayBuffer():
     def __init__(self, max_capacity: int, state_shape_size: int, action_space_size: int):
@@ -77,7 +75,6 @@ class ReplayBuffer():
         indices = np.random.choice(list(range(valid_entries)), batch_size)
         return self.old_state_buffer[indices], self.new_state_buffer[indices], self.action_buffer[indices], self.reward_buffer[indices], self.is_terminal_buffer[indices]
 
-
 class SACPolicyLoss(nn.Module):
     def __init__(self):
         super(SACPolicyLoss, self).__init__()
@@ -86,7 +83,6 @@ class SACPolicyLoss(nn.Module):
     def forward(self, min_critic, entropy, alpha):
         # gradient ASCENT - negate the loss function in the pseudocode, since our optimiser will perform gradient DESCENT
         return torch.mean(alpha * entropy - min_critic)
-
 
 class SACPolicyNetwork(nn.Module):
     def __init__(self, input_dim: int=256, hidden_units: int=256, action_dim: int=1, action_max:float=1):
@@ -174,9 +170,44 @@ class SACValueNetwork(nn.Module):
 
         return torch.squeeze(action_value_estimate_1)
 
+class SACDoubleValueNetwork(nn.Module):
+    def __init__(self, input_dim:int=256, hidden_dim:int=256):
+        super(SACValueNetwork, self).__init__()
+
+        self._input_dim = input_dim
+        self._hidden_dim = hidden_dim
+
+        # they used 2 hidden layers and 256 hidden units in paper
+        self.ann1 = nn.Sequential(
+            nn.Linear(self._input_dim, self._hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self._hidden_dim, self._hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self._hidden_dim, 1),
+        )
+
+        self.ann2 = nn.Sequential(
+            nn.Linear(self._input_dim, self._hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self._hidden_dim, self._hidden_dim),
+            nn.ReLU(),
+            nn.Linear(self._hidden_dim, 1),
+        )
+
+
+    def forward(self, state:torch.Tensor, action:torch.Tensor)->torch.Tensor:
+        # Assuming batch is dim=0, so state is shape [batch,state_space]
+        # action is [batch,action_space]
+
+        network_input = torch.cat([state, action], dim=1)
+        action_value_estimate_1 = self.ann1(network_input) # estimate the value of an action in a state
+        action_value_estimate_2 = self.ann2(network_input) # estimate the value of an action in a state
+
+        return torch.squeeze(action_value_estimate_1),torch.squeeze(action_value_estimate_2)
+
 ## WORKING AGENT
 class SACAgent(Agent):
-    def __init__(self, env: gym.Env, update_threshold: int=1, batch_size: int=256, lr: float=3e-4, gamma: float=0.99, polyak=0.995, fixed_alpha=None,reward_scale:float=5, make_video:float=False):
+    def __init__(self, env: gym.Env, update_threshold: int=1, batch_size: int=256, lr: float=3e-4, gamma: float=0.99, polyak=0.995, fixed_alpha=None,reward_scale:float=5):
         super(SACAgent, self).__init__(env)
 
         # line 1 of pseudocode
@@ -188,32 +219,29 @@ class SACAgent(Agent):
         # model hyperparams
         self.reward_scale = reward_scale
         self.batch_size = batch_size
-        self.fixed_alpha = fixed_alpha
         self.lr = lr
         self.gamma = gamma
         self.polyak = polyak
-        self.make_video = make_video
 
         observation_space_shape = env.observation_space._shape[0]
         action_space_shape = env.action_space._shape[0]
         action_space_max_value = env.action_space.high[0]
-
-        self.replay_buffer = ReplayBuffer(1000000, observation_space_shape, action_space_shape)
         
-        self.actor = SACPolicyNetwork(input_dim=observation_space_shape, action_dim=action_space_shape, action_max=action_space_max_value)
+        self.actor = SACPolicyNetwork(observation_space_shape,256,action_space_shape,action_space_max_value)
         self.critic_1 = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
         self.critic_2 = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
-        self.critic_target_1 = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
-        self.critic_target_2 = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
+        self.critic_1_target = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
+        self.critic_2_target = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
 
         self.actor_loss = SACPolicyLoss()
         self.critic_1_loss = nn.MSELoss()
         self.critic_2_loss = nn.MSELoss()
 
+        self.replay_buffer = ReplayBuffer(1000000, observation_space_shape, action_space_shape)
 
-        self.actor_optimiser = optim.Adam(self.actor.parameters(), lr=self.lr)
-        self.critics_optimiser = optim.Adam(list(self.critic_1.parameters())+list(self.critic_2.parameters()), lr=self.lr)
-
+        self.actor_optimiser = optim.Adam(self.actor.parameters(), lr=lr)
+        self.critics_optimiser = optim.Adam(list(self.critic_1.parameters())+list(self.critic_2.parameters()), lr=lr)
+        
         self.fixed_alpha = fixed_alpha
         if fixed_alpha is None:
             self.log_alpha = torch.tensor(0.0, requires_grad=True)
@@ -225,13 +253,11 @@ class SACAgent(Agent):
         # line 2 of pseudocode
         self.polyak_update(0)
 
-
     def polyak_update(self, polyak):
-        for (parameter, target_parameter) in zip(self.critic_1.parameters(), self.critic_target_1.parameters()):
+        for (parameter, target_parameter) in zip(self.critic_1.parameters(), self.critic_1_target.parameters()):
             target_parameter.data.copy_((1 - polyak) * parameter.data + polyak * target_parameter.data)
-        for (parameter, target_parameter) in zip(self.critic_2.parameters(), self.critic_target_2.parameters()):
+        for (parameter, target_parameter) in zip(self.critic_2.parameters(), self.critic_2_target.parameters()):
             target_parameter.data.copy_((1 - polyak) * parameter.data + polyak * target_parameter.data)
-
 
     def train(self, num_timesteps=50000, start_timesteps=1000):
         """Train the agent over a given number of episodes."""
@@ -246,21 +272,16 @@ class SACAgent(Agent):
                 
         super().train(num_timesteps=num_timesteps, start_timesteps=start_timesteps)
 
-
     def simulate_episode(self, should_learn=True):
-        reward_total = 0
 
         state, _ = self.env.reset()
-        state = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
+        reward_total = 0
         timestep = 0
-        a_loss=0
-        c_loss=0
+        a_loss,c_loss = 0,0
+
 
         # line 3 of pseudocode
         while True:
-            if self.persistent_timesteps in {35000,125000,225000,525000,1010000} and self.make_video:
-                save_path_str = "gaapaba"+str(self.persistent_timesteps)+".mp4"
-                make_video_sample("Ant-v4",self,save_path_str)
 
             timestep += 1
             self.persistent_timesteps += 1
@@ -268,36 +289,25 @@ class SACAgent(Agent):
             # line 4 of pseudocode
             if should_learn:
                 with torch.no_grad():
-                    action = self.actor.sample(state)[0].detach().numpy()
-                new_state, reward, is_finished, is_truncated, _ = self.env.step(action[0])
+                    action = self.actor.sample(torch.tensor([state], dtype=torch.float32))[0].numpy()[0]
             else:
                 action = self.env.action_space.sample()
-                new_state, reward, is_finished, is_truncated, _ = self.env.step(action)
 
+            new_state, reward, is_finished, is_truncated, _ = self.env.step(action)
             reward_total += reward
+
             reward*=self.reward_scale
+            self.replay_buffer.add(Experience(state, new_state, action, reward, is_finished))
+            state=new_state
 
-            # line 5-6 of pseudocode
-            new_state = torch.tensor(new_state, dtype=torch.float32).unsqueeze(0)
+            if should_learn and self.persistent_timesteps%self.update_threshold==0:
+                a_loss,c_loss = self.update_params()
 
-            # line 7 of pseudocode
-            self.replay_buffer.add(Experience(state.flatten(), new_state.flatten(), action, reward, is_finished))
-
-            # line 8 of pseudocode
             if is_finished or is_truncated:
                 break
 
-            # line 9 of pseudocode
-            if not should_learn or self.persistent_timesteps % self.update_threshold != 0:
-                continue
-
-            # lines 11-15 of pseudocode
-            a_loss,c_loss = self.update_params()
-            
-            state = new_state
         print(f"Actor loss: {a_loss} Critic loss: {c_loss}")
         return timestep, reward_total
-    
 
     def update_params(self):
 
@@ -309,38 +319,35 @@ class SACAgent(Agent):
         rewards = torch.tensor(rewards, dtype=torch.float32)
         terminals = torch.tensor(terminals, dtype=torch.float32)
 
-        self.critics_optimiser.zero_grad()
+        # self.critics_optimiser.zero_grad()
 
         critic_1_evaluation = self.critic_1(old_states,actions)
         critic_2_evaluation = self.critic_2(old_states,actions)
 
-        with torch.no_grad():
 
-            actor_prediction_new, log_actor_probability_new = self.actor.sample(new_states)#for their version there was no sample, just object call (forward)
+        actor_prediction_new, log_actor_probability_new = self.actor.sample(new_states)
 
-            critic_target_1_prediction = self.critic_target_1(new_states, actor_prediction_new)
-            critic_target_2_prediction = self.critic_target_2(new_states, actor_prediction_new)
-            critic_target_clipped = torch.min(critic_target_1_prediction, critic_target_2_prediction)
+        critic_target_1_prediction = self.critic_1_target(new_states, actor_prediction_new)
+        critic_target_2_prediction = self.critic_2_target(new_states, actor_prediction_new)
+        critic_target_clipped = torch.min(critic_target_1_prediction, critic_target_2_prediction)
 
-            target = rewards + self.gamma * (1 - terminals) * (critic_target_clipped - self.alpha * log_actor_probability_new)
-
-        # critic_1_loss = ((critic_1_evaluation - target)**2).mean()
-        # critic_2_loss = ((critic_2_evaluation - target)**2).mean()
+        predicted_target_reward = (critic_target_clipped - self.alpha * log_actor_probability_new)
+        target = rewards + self.gamma * (1 - terminals) * predicted_target_reward
+        
         critic_1_loss = self.critic_1_loss(critic_1_evaluation,target)
         critic_2_loss = self.critic_2_loss(critic_2_evaluation,target)
         total_critic_loss = critic_1_loss + critic_2_loss
-
+        self.critics_optimiser.zero_grad()
         total_critic_loss.backward()
         self.critics_optimiser.step()
 
         self.actor_optimiser.zero_grad()
 
-        actor_prediction_old, log_actor_probability_old = self.actor.sample(old_states)#for their version there was no sample, just object call (forward)
+        actor_prediction_old, log_actor_probability_old = self.actor.sample(old_states)
         critic_1_prediction = self.critic_1(old_states, actor_prediction_old)
         critic_2_prediction = self.critic_2(old_states, actor_prediction_old)
         critic_clipped = torch.min(critic_1_prediction, critic_2_prediction)
 
-        # actor_loss = (self.alpha * log_actor_probability_old - critic_clipped).mean()
         actor_loss = self.actor_loss(critic_clipped,log_actor_probability_old,self.alpha)
 
         if self.fixed_alpha is None:
@@ -357,117 +364,108 @@ class SACAgent(Agent):
             self.alpha_optimiser.step()
             self.alpha = self.log_alpha.exp()
 
-        with torch.no_grad():
-            self.polyak_update(self.polyak)
+        self.polyak_update(self.polyak)
 
         return actor_loss.detach().numpy().item(),total_critic_loss.detach().numpy().item()
 
+    # def update_params(self):
+    #     # line 11 of pseudocode
+    #     old_states, new_states, actions, rewards, terminals = self.replay_buffer.get(self.batch_size)
 
-    def update_params_og(self):
-        # line 11 of pseudocode
-        old_states, new_states, actions, rewards, terminals = self.replay_buffer.get(self.batch_size)
+    #     old_states = torch.tensor(old_states, dtype=torch.float32)
+    #     new_states = torch.tensor(new_states, dtype=torch.float32)
+    #     actions = torch.tensor(actions, dtype=torch.float32)
+    #     rewards = torch.tensor(rewards, dtype=torch.float32)
+    #     terminals = torch.tensor(terminals, dtype=torch.float32)
 
-        old_states = torch.tensor(old_states, dtype=torch.float32)
-        new_states = torch.tensor(new_states, dtype=torch.float32)
-        actions = torch.tensor(actions, dtype=torch.float32)
-        rewards = torch.tensor(rewards, dtype=torch.float32)*self.reward_scale
-        terminals = torch.tensor(terminals, dtype=torch.float32)
+    #     critic_1_evaluation = self.critic_1.forward(old_states, actions)
+    #     critic_2_evaluation = self.critic_2.forward(old_states, actions)
 
-        self.critics_optimiser.zero_grad()
+    #     # line 12 of pseudocode
+    #     actor_prediction_new, log_actor_probability_new = self.actor.sample(new_states)
 
-        critic_1_evaluation = self.critic_1.forward(old_states, actions)
-        critic_2_evaluation = self.critic_2.forward(old_states, actions)
+    #     critic_target_1_prediction = self.critic_1_target.forward(new_states, actor_prediction_new)
+    #     critic_target_2_prediction = self.critic_2_target.forward(new_states, actor_prediction_new)
+    #     critic_target_clipped = torch.min(critic_target_1_prediction, critic_target_2_prediction)
 
-        # line 12 of pseudocode
-        with torch.no_grad():
-            actor_prediction_new, log_actor_probability_new = self.actor.sample(new_states)
+    #     predicted_target_reward = critic_target_clipped - self.alpha * log_actor_probability_new
+    #     target = rewards + self.gamma * (1 - terminals) * predicted_target_reward
 
-            critic_target_1_prediction = self.critic_target_1.forward(new_states, actor_prediction_new)
-            critic_target_2_prediction = self.critic_target_2.forward(new_states, actor_prediction_new)
-            critic_target_clipped = torch.min(critic_target_1_prediction, critic_target_2_prediction)
+    #     # # line 13 of pseudocode
 
-            # alpha = self.log_alpha.exp() if self.fixed_alpha is None else self.fixed_alpha
+    #     critic_1_loss = self.critic_1_loss(critic_1_evaluation, target)
+    #     critic_2_loss = self.critic_2_loss(critic_2_evaluation, target)
+    #     total_critic_loss = critic_1_loss + critic_2_loss
 
-            predicted_target_reward = critic_target_clipped - self.fixed_alpha * log_actor_probability_new
-            target = rewards + self.gamma * (1 - terminals) * predicted_target_reward
+    #     self.critics_optimiser.zero_grad()
+    #     total_critic_loss.backward()
+    #     self.critics_optimiser.step()
 
-        # # line 13 of pseudocode
+    #     # line 14 of pseudocode
+    #     actor_prediction_old, log_actor_probability_old = self.actor.sample(old_states)
 
-        critic_1_loss = self.critic_1_loss(critic_1_evaluation, target)
-        critic_2_loss = self.critic_2_loss(critic_2_evaluation, target)
-        total_critic_loss = critic_1_loss + critic_2_loss
+    #     critic_1_prediction = self.critic_1.forward(old_states, actor_prediction_old)
+    #     critic_2_prediction = self.critic_2.forward(old_states, actor_prediction_old)
+    #     critic_clipped = torch.min(critic_1_prediction, critic_2_prediction)
 
-        total_critic_loss.backward()
-        self.critics_optimiser.step()
+    #     actor_loss = self.actor_loss(critic_clipped, log_actor_probability_old, self.alpha)
+       
+    #     self.actor_optimiser.zero_grad()
+    #     actor_loss.backward()
+    #     self.actor_optimiser.step()
 
-        # line 14 of pseudocode
-        self.actor_optimiser.zero_grad()
-        actor_prediction_old, log_actor_probability_old = self.actor.sample(old_states)
+    #     # temperature tuning
+    #     if self.fixed_alpha is None:
+    #         alpha_loss = -(self.log_alpha * (log_actor_probability_old + self.target_entropy).detach()).mean()
+    #         self.alpha_optimiser.zero_grad()
+    #         alpha_loss.backward()
+    #         self.alpha_optimiser.step()
 
-        critic_1_prediction = self.critic_1.forward(old_states, actor_prediction_old)
-        critic_2_prediction = self.critic_2.forward(old_states, actor_prediction_old)
-        critic_clipped = torch.min(critic_1_prediction, critic_2_prediction)
+    #     self.polyak_update(self.polyak)
 
-        actor_loss = self.actor_loss(critic_clipped, log_actor_probability_old, self.fixed_alpha)
+    #     return actor_loss.detach().numpy().item(),total_critic_loss.detach().numpy().item()
 
-        actor_loss.backward()
-        self.actor_optimiser.step()
-
-        # temperature tuning
-        # if self.fixed_alpha is None:
-        #     alpha_loss = -(self.log_alpha * (log_actor_probability_old + self.target_entropy).detach()).mean()
-        #     self.alpha_optimiser.zero_grad()
-        #     alpha_loss.backward()
-        #     self.alpha_optimiser.step()
-
-        with torch.no_grad():
-            self.polyak_update(self.polyak)
-
-        return actor_loss.detach().numpy().item(),total_critic_loss.detach().numpy().item()
-
-    def predict(self, state):
-        with torch.no_grad():
-            action = self.actor.forward(state.unsqueeze(0))
-            scaled_action = torch.tanh(action[0])*self.actor.action_max
-        return scaled_action.detach().numpy()[0]
+    # def predict(self, state):
+    #     with torch.no_grad():
+    #         action = self.actor.forward(state.unsqueeze(0))
+    #         scaled_action = torch.tanh(action[0])*self.actor.action_max
+    #     return scaled_action.detach().numpy()[0]
     
+    # def save(self, path):
+    #     print(f"Saving model to {path}...")
+    #     with open(path, "wb") as file:
+    #         pickle.dump((self.actor.state_dict(), 
+    #                      self.critics.state_dict(), 
+    #                      self.critic_targets.state_dict(), 
+    #                      self.actor_optimiser.state_dict(),
+    #                      self.critics_optimiser.state_dict(),
+    #                      self.replay_buffer), file)
 
-    def save(self, path):
-        print(f"Saving model to {path}...")
-        with open(path, "wb") as file:
-            pickle.dump((self.actor.state_dict(), 
-                         self.critics.state_dict(), 
-                         self.critic_targets.state_dict(), 
-                         self.actor_optimiser.state_dict(),
-                         self.critics_optimiser.state_dict(),
-                         self.replay_buffer), file)
-
-    def load(self, path):
-        if os.path.exists(path):
-            print(f"Loading model from {path}...")
-            with open(path, "rb") as file:
-                actor_dict, critics_dict, critic_targets_dict, actor_optim_dict, critics_optim_dict, self.replay_buffer = pickle.load(file)
-                self.actor.load_state_dict(actor_dict)
-                self.critics.load_state_dict(critics_dict)
-                self.critic_targets.load_state_dict(critic_targets_dict)
-                self.actor_optimiser.load_state_dict(actor_optim_dict)
-                self.critics_optimiser.load_state_dict(critics_optim_dict)
+    # def load(self, path):
+    #     if os.path.exists(path):
+    #         print(f"Loading model from {path}...")
+    #         with open(path, "rb") as file:
+    #             actor_dict, critics_dict, critic_targets_dict, actor_optim_dict, critics_optim_dict, self.replay_buffer = pickle.load(file)
+    #             self.actor.load_state_dict(actor_dict)
+    #             self.critics.load_state_dict(critics_dict)
+    #             self.critic_targets.load_state_dict(critic_targets_dict)
+    #             self.actor_optimiser.load_state_dict(actor_optim_dict)
+    #             self.critics_optimiser.load_state_dict(critics_optim_dict)
 
 class SACAgent3(Agent):
-    def __init__(self, env: gym.Env, update_threshold: int=1, batch_size: int=256, lr: float=3e-4, gamma: float=0.99, polyak=0.995, fixed_alpha=None,reward_scale:float=5, make_video:float=False):
+    def __init__(self, env: gym.Env, update_threshold: int=1, batch_size: int=256, lr: float=3e-4, gamma: float=0.99, polyak=0.995, fixed_alpha=None,reward_scale:float=5):
         super(SACAgent3, self).__init__(env)
-        self.timestep_list = []
-        self.reward_list = []
 
         self.env = env
         self.update_threshold = update_threshold
+        self.persistent_timesteps = 0
+        self.updates = 0
 
         self.reward_scale = reward_scale
         self.batch_size = batch_size
         self.lr = lr
         self.gamma = gamma
         self.polyak = polyak
-        self.make_video = make_video
 
         observation_space_shape = env.observation_space._shape[0]
         action_space_shape = env.action_space._shape[0]
@@ -523,7 +521,7 @@ class SACAgent3(Agent):
 
         with torch.no_grad():
 
-            actor_prediction_new, log_actor_probability_new = self.actor.sample(new_states)#for their version there was no sample, just object call (forward)
+            actor_prediction_new, log_actor_probability_new = self.actor.sample(new_states)
 
             critic_target_1_prediction = self.critic_1_target(new_states, actor_prediction_new)
             critic_target_2_prediction = self.critic_2_target(new_states, actor_prediction_new)
@@ -531,8 +529,6 @@ class SACAgent3(Agent):
 
             target = rewards + self.gamma * (1 - terminals) * (critic_target_clipped - self.alpha * log_actor_probability_new)
 
-        # critic_1_loss = ((critic_1_evaluation - target)**2).mean()
-        # critic_2_loss = ((critic_2_evaluation - target)**2).mean()
         critic_1_loss = self.critic_1_loss(critic_1_evaluation,target)
         critic_2_loss = self.critic_2_loss(critic_2_evaluation,target)
         total_critic_loss = critic_1_loss + critic_2_loss
@@ -542,12 +538,11 @@ class SACAgent3(Agent):
 
         self.actor_optimiser.zero_grad()
 
-        actor_prediction_old, log_actor_probability_old = self.actor.sample(old_states)#for their version there was no sample, just object call (forward)
+        actor_prediction_old, log_actor_probability_old = self.actor.sample(old_states)
         critic_1_prediction = self.critic_1(old_states, actor_prediction_old)
         critic_2_prediction = self.critic_2(old_states, actor_prediction_old)
         critic_clipped = torch.min(critic_1_prediction, critic_2_prediction)
 
-        # actor_loss = (self.alpha * log_actor_probability_old - critic_clipped).mean()
         actor_loss = self.actor_loss(critic_clipped,log_actor_probability_old,self.alpha)
 
         if self.fixed_alpha is None:
@@ -568,11 +563,6 @@ class SACAgent3(Agent):
             self.polyak_update(self.polyak)
 
         return actor_loss.detach().numpy().item(),total_critic_loss.detach().numpy().item()
-
-    def get_action(self,o):
-        with torch.no_grad():
-            a, _ = self.actor.sample(torch.as_tensor([o], dtype=torch.float32))
-            return a[0].numpy()
 
     def train(self, num_timesteps=50000, start_timesteps=1000):
         """Train the agent over a given number of episodes."""
@@ -621,24 +611,19 @@ class SACAgent3(Agent):
         print(f"Actor loss: {a_loss} Critic loss: {c_loss}")
         return timestep, reward_total
    
-
-# I think its fixed now??? update main agent 
 if __name__ == "__main__":
 
     for i in range(1):
         # make_video = True if i==0 else False
         env = gym.make("Ant-v4", render_mode="rgb_array")
-        # agent = SACAgent3(env,fixed_alpha=None,reward_scale=1.0,lr=3e-4,batch_size=256,make_video=False)
-        agent = SACAgent3(env,fixed_alpha=0.2,reward_scale=5.0,lr=3e-4,batch_size=256,make_video=False)
-        agent.train(250_000,10_000)
+        agent = SACAgent(env,fixed_alpha=0.2,reward_scale=5.0,lr=3e-4,batch_size=256)
+        agent.train(300_000,10_000)
    
         # np.save("sac_tuned_ant_timesteps_1000000_"+str(i)+".npy", np.array(agent.timestep_list))
         # np.save("sac_tuned_ant_rewards_1000000_"+str(i)+".npy", np.array(agent.reward_list))
         # make_video_sample("Ant-v4",agent,"sac_tuned_ant_1000000_"+str(i)+".mp4")
-        np.save("sac_test_ours2_timesteps.npy", np.array(agent.timestep_list))
-        np.save("sac_test_ours2_rewards.npy", np.array(agent.reward_list))
-    
-    # sac(env)
-    # env = gym.make("Ant-v4", render_mode="rgb_array")
-    # agent = SACAgent2(env,fixed_alpha=None,reward_scale=1.0,lr=3e-4,batch_size=256)
-    # agent.train(1_000_000,10_000)
+        np.save("sac_og_v1_timesteps.npy", np.array(agent.timestep_list))
+        np.save("sac_og_v1_rewards.npy", np.array(agent.reward_list))
+
+#TODOS: export temperature loss to separate function
+#TRY USING A DOUBLE CRITIC IN ONE MODEL

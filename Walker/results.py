@@ -203,19 +203,86 @@ def make_video_ddpg(env_name,agent:ddpg.DDPGAgent,save_path):
     # np.save("random_humanoid_timesteps_1000000_"+str(i)+".npy",np.array(random_timesteps))
     # np.save("random_humanoid_rewards_1000000_"+str(i)+".npy",np.array(random_rewards))
 
-our_timesteps = np.load("sac_test_ours_timesteps.npy")
-our_rewards = np.load("sac_test_ours_rewards.npy")
-their_timesteps = np.load("sac_test_theirs_timesteps.npy")
-their_rewards = np.load("sac_test_theirs_rewards.npy")
+
+# our_timesteps = np.load("sac_test_ours_timesteps.npy")
+# our_rewards = np.load("sac_test_ours_rewards.npy")
+# their_timesteps = np.load("sac_test_theirs_timesteps.npy")
+# their_rewards = np.load("sac_test_theirs_rewards.npy")
+
+sac_tuned_timesteps = np.load('sac_tuned_ant_timesteps_1000000_0.npy')
+sac_tuned_rewards = np.load('sac_tuned_ant_rewards_1000000_0.npy')
+sac_tuned_timesteps_2 = np.load('sac_tuned_ant_timesteps_1000000_1.npy')
+sac_tuned_rewards_2 = np.load('sac_tuned_ant_rewards_1000000_1.npy')
+sac_tuned_timesteps_3 = np.load('sac_tuned_ant_timesteps_1000000_2.npy')
+sac_tuned_rewards_3 = np.load('sac_tuned_ant_rewards_1000000_2.npy')
+
+sac_timesteps = np.load('new1_sac_ant_timesteps_1000000_0.npy')
+sac_rewards = np.load('new1_sac_ant_rewards_1000000_0.npy')
+sac_timesteps_2 = np.load('new1_sac_ant_timesteps_1000000_1.npy')
+sac_rewards_2 = np.load('new1_sac_ant_rewards_1000000_1.npy')
+sac_timesteps_3 = np.load('new1_sac_ant_timesteps_1000000_2.npy')
+sac_rewards_3 = np.load('new1_sac_ant_rewards_1000000_2.npy')
+
+new_our_timesteps_tuned = np.load("sac_test_ours_tuned_timesteps.npy")
+new_our_rewards_tuned = np.load("sac_test_ours_tuned_rewards.npy")
+
+new_our_timesteps_not_tuned = np.load("sac_test_ours_nottuned_timesteps.npy")
+new_our_rewards_not_tuned = np.load("sac_test_ours_nottuned_rewards.npy")
+
+sac_tuned_scaledr_timesteps = np.load("sac_test_ours_tuned_scaledr_timesteps.npy")
+sac_tuned_scaledr_rewards = np.load("sac_test_ours_tuned_scaledr_rewards.npy")
+
+
+def moving_average(data, window_size=11):
+    padded_data = np.pad(data, (window_size // 2, window_size // 2), mode='reflect')
+
+    smoothed_data = np.convolve(padded_data, np.ones(window_size) / window_size, mode='valid')
+    return smoothed_data
+
+sac_rewards =  moving_average(sac_rewards)
+sac_timesteps = sac_timesteps[:len(sac_rewards)]
+
+sac_rewards_2 =  moving_average(sac_rewards_2)
+sac_timesteps_2 = sac_timesteps_2[:len(sac_rewards_2)]
+
+sac_rewards_3 =  moving_average(sac_rewards_3)
+sac_timesteps_3 = sac_timesteps_3[:len(sac_rewards_3)]
+
+sac_tuned_rewards =  moving_average(sac_tuned_rewards)
+sac_tuned_timesteps = sac_tuned_timesteps[:len(sac_tuned_rewards)]
+
+sac_tuned_rewards_2 =  moving_average(sac_tuned_rewards_2)
+sac_tuned_timesteps_2 = sac_tuned_timesteps_2[:len(sac_tuned_rewards_2)]
+
+sac_tuned_rewards_3 =  moving_average(sac_tuned_rewards_3)
+sac_tuned_timesteps_3 = sac_tuned_timesteps_3[:len(sac_tuned_rewards_3)]
+
+new_our_rewards_tuned =  moving_average(new_our_rewards_tuned)
+new_our_timesteps_tuned = new_our_timesteps_tuned[:len(new_our_rewards_tuned)]
+
+new_our_rewards_not_tuned =  moving_average(new_our_rewards_not_tuned)
+new_our_timesteps_not_tuned = new_our_timesteps_tuned[:len(new_our_rewards_not_tuned)]
+
+sac_tuned_scaledr_rewards =  moving_average(sac_tuned_scaledr_rewards)
+sac_tuned_scaledr_timesteps = sac_tuned_scaledr_timesteps[:len(sac_tuned_scaledr_rewards)]
 
 plt.figure(figsize=(10, 6))
-plt.plot(their_timesteps, their_rewards, label="their rewards", color="green")
-plt.plot(our_timesteps, our_rewards, label="our rewards", color="red")
+plt.plot(sac_tuned_timesteps, sac_tuned_rewards, label="tuned", color="red")
+plt.plot(sac_tuned_timesteps_2, sac_tuned_rewards_2, label="tuned", color="red")
+plt.plot(sac_tuned_timesteps_3, sac_tuned_rewards_3, label="tuned", color="red")
+
+plt.plot(sac_timesteps, sac_rewards, label="not", color="green")
+plt.plot(sac_timesteps_2, sac_rewards_2, label="not", color="green")
+plt.plot(sac_timesteps_3, sac_rewards_3, label="not", color="green")
+
+plt.plot(new_our_timesteps_tuned, new_our_rewards_tuned, label="ours tuned", color="yellow")
+plt.plot(new_our_timesteps_not_tuned, new_our_rewards_not_tuned, label="ours not", color="purple")
+plt.plot(sac_tuned_scaledr_timesteps, sac_tuned_scaledr_rewards, label="tuned bad scaled", color="black")
+
+
 plt.xlabel("Timesteps")
 plt.ylabel("Rewards")
 plt.title("Rewards vs Timesteps")
 plt.legend()
 plt.grid()
 plt.show()
-
-# MIGHT HAVE TO RERUN PEAK REWARDS, SHOULD GET THE THREE MAXES AND MEAN, THEN STD

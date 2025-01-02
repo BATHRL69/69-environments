@@ -114,8 +114,7 @@ class ReplayBuffer():
 
 class TD3Agent(Agent):
 
-    # hidden_size = (256, 256)
-    hidden_size = (400, 300)
+    hidden_size = (256, 256)
 
     def __init__(
             self,

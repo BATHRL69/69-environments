@@ -221,7 +221,6 @@ def moving_average_thrice(r1,t1,r2,t2,r3,t3,window_size = 25):
   t3 = t3[:len(r3)]
   return r1,t1,r2,t2,r3,t3
 
-
 humanoid_td3_rewards,humanoid_td3_timesteps,humanoid_td3_rewards_2,humanoid_td3_timesteps_2,humanoid_td3_rewards_3,humanoid_td3_timesteps_3 = moving_average_thrice(humanoid_td3_rewards,humanoid_td3_timesteps,humanoid_td3_rewards_2,humanoid_td3_timesteps_2,humanoid_td3_rewards_3,humanoid_td3_timesteps_3)
 
 humanoid_sac_rewards,humanoid_sac_timesteps,humanoid_sac_rewards_2,humanoid_sac_timesteps_2,humanoid_sac_rewards_3,humanoid_sac_timesteps_3 = moving_average_thrice(humanoid_sac_rewards,humanoid_sac_timesteps,humanoid_sac_rewards_2,humanoid_sac_timesteps_2,humanoid_sac_rewards_3,humanoid_sac_timesteps_3)
@@ -249,7 +248,6 @@ humanoid_td3_rewards_aligned = interpolate_rewards(
 )
 humanoid_td3_mean = humanoid_td3_rewards_aligned.mean(axis=0)
 humanoid_td3_std = humanoid_td3_rewards_aligned.std(axis=0)
-
 
 #SAC
 humanoid_sac_rewards_aligned = interpolate_rewards(
@@ -319,7 +317,7 @@ humanoid_sac_tuned_std = humanoid_sac_tuned_rewards_aligned.std(axis=0)
 # plt.legend()
 # plt.grid()
 # plt.show()
-
+plt.rcParams.update({'font.size': 20})
 fig, axs = plt.subplots(1, 2, figsize=(20, 6))
 
 axs[0].plot(common_timesteps, random_mean, label="Random", color="black")
@@ -380,7 +378,7 @@ axs[0].fill_between(
 )
 axs[0].set_xlabel("Timesteps")
 axs[0].set_ylabel("Average Reward")
-axs[0].legend()
+axs[0].legend(fontsize=16)
 axs[0].grid()
 axs[0].set_title("Ant-v4")
 
@@ -417,7 +415,7 @@ axs[1].fill_between(
     alpha=0.2,
 )
 axs[1].set_xlabel("Timesteps")
-# axs[1].legend()
+axs[1].legend(fontsize=16)
 axs[1].grid()
 axs[1].set_title("Humanoid-v4")
 
@@ -460,6 +458,40 @@ data = [
     (ppo_max_mean_reward, ppo_max_std_reward),
     (dpo_max_mean_reward, dpo_max_std_reward),
     (ddpg_max_mean_reward, ddpg_max_std_reward),
+    (td3_max_mean_reward, td3_max_std_reward),
+    (sac_tuned_max_mean_reward, sac_tuned_max_std_reward),
+    (random_max_mean_reward,random_max_std_reward)
+]
+
+data = [(round(a,2),round(b,2)) for a,b in data]
+
+table = pd.DataFrame(data, columns=["Max Mean Reward", "Max Std Reward"], index=methods)
+
+table["Mean ± Std"] = table["Max Mean Reward"].astype(str) + " ± " + table["Max Std Reward"].astype(str)
+
+table = table[["Mean ± Std"]]
+
+print(table)
+
+sac_max_reward_loc = np.argmax(humanoid_sac_mean)
+sac_max_mean_reward = humanoid_sac_mean[sac_max_reward_loc]
+sac_max_std_reward = humanoid_sac_std[sac_max_reward_loc]
+
+td3_max_reward_loc = np.argmax(humanoid_td3_mean)
+td3_max_mean_reward = humanoid_td3_mean[td3_max_reward_loc]
+td3_max_std_reward = humanoid_td3_std[td3_max_reward_loc]
+
+sac_tuned_max_reward_loc = np.argmax(humanoid_sac_tuned_mean)
+sac_tuned_max_mean_reward = humanoid_sac_tuned_mean[sac_tuned_max_reward_loc]
+sac_tuned_max_std_reward = humanoid_sac_tuned_std[sac_tuned_max_reward_loc]
+
+random_max_reward_loc = np.argmax(humanoid_random_mean)
+random_max_mean_reward = humanoid_random_mean[random_max_reward_loc]
+random_max_std_reward = humanoid_random_std[random_max_reward_loc]
+
+methods = ["SAC", "TD3", "SAC (Tuned)","Random"]
+data = [
+    (sac_max_mean_reward, sac_max_std_reward),
     (td3_max_mean_reward, td3_max_std_reward),
     (sac_tuned_max_mean_reward, sac_tuned_max_std_reward),
     (random_max_mean_reward,random_max_std_reward)
