@@ -376,19 +376,22 @@ class PPOAgent(Agent):
         # torch.nn.utils.clip_grad_norm_(self.policy_network.parameters(), max_norm=1.0)
         self.policy_optimiser.zero_grad()
         policy_loss.backward()
-
         self.policy_optimiser.step()
-
         # Line 7 in pseudocode
         value_estimates = torch.tensor(
             [self.value_network.forward(this_state) for this_state in states],
             requires_grad=True,
         )
+
+        # you can do this. its equivalent. also you can put a .squeeze directly in the forward, should help
+        # value_estimates = self.value_network.forward(states).squeeze()
         value_loss = normalisation_factor * torch.mean(
             torch.square(value_estimates - rewards_to_go)
         )
         value_loss.backward()
         self.value_optimiser.step()
+
+        print(f" Actor loss: {policy_loss.detach().numpy().item()} Critic loss: {value_loss.detach().numpy().item()}")
 
     def simulate_episode(self):
         """Simulate a single episode, called by train method on parent class"""
