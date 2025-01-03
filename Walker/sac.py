@@ -1,7 +1,5 @@
 import gymnasium as gym
 import numpy as np
-import os
-import pickle
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -9,6 +7,12 @@ import torch.optim as optim
 from agent import Agent
 from typing import NamedTuple, Any
 
+# ===========================================================
+#
+# SAC implementation based on OpenAI Spinning Up pseudocode
+# https://spinningup.openai.com/en/latest/algorithms/sac.html
+#
+# ===========================================================
 
 class Experience(NamedTuple):
     old_state: Any
@@ -16,7 +20,6 @@ class Experience(NamedTuple):
     action: Any
     reward: float
     is_terminal: bool
-
 
 class ReplayBuffer():
     def __init__(self, max_capacity: int, state_shape_size: int, action_space_size: int):
@@ -29,7 +32,6 @@ class ReplayBuffer():
         self.reward_buffer = np.zeros(max_capacity)
         self.is_terminal_buffer = np.zeros(max_capacity)     
     
-
     def add(self, experience: Experience):
         idx = self.counter % self.max_capacity
         self.counter += 1
@@ -40,22 +42,18 @@ class ReplayBuffer():
         self.reward_buffer[idx] = experience.reward
         self.is_terminal_buffer[idx] = experience.is_terminal
     
-
     def get(self, batch_size: int):
         valid_entries = min(self.counter, self.max_capacity)
         indices = np.random.choice(list(range(valid_entries)), batch_size)
         return self.old_state_buffer[indices], self.new_state_buffer[indices], self.action_buffer[indices], self.reward_buffer[indices], self.is_terminal_buffer[indices]
 
-
 class SACPolicyLoss(nn.Module):
     def __init__(self):
         super(SACPolicyLoss, self).__init__()
-    
 
     def forward(self, min_critic, entropy, alpha):
         # gradient ASCENT - negate the loss function in the pseudocode, since our optimiser will perform gradient DESCENT
         return torch.mean(alpha * entropy - min_critic)
-
 
 class SACPolicyNetwork(nn.Module):
     def __init__(self, input_dim: int=256, hidden_units: int=256, action_dim: int=1, action_max:float=1):
@@ -74,20 +72,16 @@ class SACPolicyNetwork(nn.Module):
         )
 
         self.mean = nn.Linear(self._hidden_units, self._action_dim)
-        # attempting to simplify this to std for now
-        # note: attempt didnt work because: log negative numbers = bad
         self.log_std = nn.Linear(self._hidden_units, self._action_dim)
-
 
     def forward(self, state:torch.Tensor)->torch.Tensor:
         hidden_values = self.ann(state)
         mean = self.mean(hidden_values)
         log_std = self.log_std(hidden_values)
-        # they clamp this between -20 and 2 in the paper i believe
+        # seems like these are standard values to use for clamping
         log_std = torch.clamp(log_std, min=-20, max=2)
 
         return mean, log_std
-    
 
     def sample(self, state:torch.Tensor)->torch.Tensor:
         ## One issue that was encountered was when trying to do just the std
@@ -108,15 +102,15 @@ class SACPolicyNetwork(nn.Module):
         log_2pi = torch.log(torch.Tensor([2 * torch.pi]))
         log_probs = -0.5 * (((probabilities - mean) / std).pow(2) + 2 * log_std + log_2pi)
 
-        # one reason for epsilon is to avoid log 0, apparently theres other reasons
-        # also idk what this term actually is but they use it in the paper
+        # epsilon is to avoid log 0 and subsequent NaN propagation
         epsilon = 1e-6
+
+        # tanh above squashes distribution to (-1, 1), so we need to adjust log probs accordingly. This is Eq 21 in SAC paper 
         log_probs -= torch.log(self.action_max * (1 - sampled_action.pow(2)) + epsilon)
         log_probs = log_probs.sum(dim=1, keepdim=True)
     
         # could get it to return mean as the 'optimal' action during evaluation?
-        return scaled_action, log_probs
-
+        return scaled_action, log_probs.squeeze()
 
 class SACValueNetwork(nn.Module):
     def __init__(self, input_dim:int=256, hidden_dim:int=256):
@@ -134,29 +128,17 @@ class SACValueNetwork(nn.Module):
             nn.Linear(self._hidden_dim, 1),
         )
 
-        self.ann2 = nn.Sequential(
-            nn.Linear(self._input_dim, self._hidden_dim),
-            nn.ReLU(),
-            nn.Linear(self._hidden_dim, self._hidden_dim),
-            nn.ReLU(),
-            nn.Linear(self._hidden_dim, 1),
-        )
-
-
     def forward(self, state:torch.Tensor, action:torch.Tensor)->torch.Tensor:
-        # Assuming batch is dim=0, so state is shape [batch,state_space]
-        # action is [batch,action_space]
+        # Assuming batch is dim=0, so state is shape [batch_size, state_space]
+        # And action is [batch_size, action_space]
 
         network_input = torch.cat([state, action], dim=1)
         action_value_estimate_1 = self.ann1(network_input) # estimate the value of an action in a state
-        action_value_estimate_2 = self.ann2(network_input) # estimate the value of an action in a state
 
-        return action_value_estimate_1, action_value_estimate_2
+        return torch.squeeze(action_value_estimate_1)
 
-
-## WORKING AGENT
 class SACAgent(Agent):
-    def __init__(self, env: gym.Env, update_threshold: int=1, batch_size: int=256, lr: float=3e-4, gamma: float=0.99, polyak=0.995, alpha:float=0.2):
+    def __init__(self, env: gym.Env, update_threshold: int=1, batch_size: int=256, lr: float=3e-4, gamma: float=0.99, polyak=0.995, fixed_alpha=None,reward_scale:float=5):
         super(SACAgent, self).__init__(env)
 
         # line 1 of pseudocode
@@ -166,8 +148,8 @@ class SACAgent(Agent):
         self.updates = 0
 
         # model hyperparams
+        self.reward_scale = reward_scale
         self.batch_size = batch_size
-        self.alpha = alpha
         self.lr = lr
         self.gamma = gamma
         self.polyak = polyak
@@ -175,89 +157,95 @@ class SACAgent(Agent):
         observation_space_shape = env.observation_space._shape[0]
         action_space_shape = env.action_space._shape[0]
         action_space_max_value = env.action_space.high[0]
-
-        self.replay_buffer = ReplayBuffer(1000000, observation_space_shape, action_space_shape)
         
-        self.actor = SACPolicyNetwork(input_dim=observation_space_shape, action_dim=action_space_shape,action_max=action_space_max_value)
-        self.critics = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
-        self.critic_targets = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
+        self.actor = SACPolicyNetwork(observation_space_shape,256,action_space_shape,action_space_max_value)
+        self.critic_1 = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
+        self.critic_2 = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
+        self.critic_1_target = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
+        self.critic_2_target = SACValueNetwork(input_dim=observation_space_shape + action_space_shape)
 
         self.actor_loss = SACPolicyLoss()
         self.critic_1_loss = nn.MSELoss()
         self.critic_2_loss = nn.MSELoss()
 
-        self.actor_optimiser = optim.Adam(self.actor.parameters(),lr=self.lr)
-        self.critics_optimiser = optim.Adam(self.critics.parameters(),lr=self.lr)
+        self.replay_buffer = ReplayBuffer(1000000, observation_space_shape, action_space_shape)
 
-        # line 2 of pseudocode
+        self.actor_optimiser = optim.Adam(self.actor.parameters(), lr=lr)
+        self.critics_optimiser = optim.Adam(list(self.critic_1.parameters())+list(self.critic_2.parameters()), lr=lr)
+        
+        self.fixed_alpha = fixed_alpha
+
+        if fixed_alpha is None:
+            self.log_alpha = torch.tensor(0.0, requires_grad=True)
+            self.alpha_optimiser = optim.Adam([self.log_alpha], lr=lr)
+            self.target_entropy = -action_space_shape # standard value from hyperparameters appendix of https://arxiv.org/abs/1812.05905
+            self.alpha = self.log_alpha.exp().item()
+        else:
+            self.alpha = fixed_alpha
+
+        #copying critic params into targets
         self.polyak_update(0)
 
-
     def polyak_update(self, polyak):
-        for (parameter, target_parameter) in zip(self.critics.parameters(), self.critic_targets.parameters()):
+        for (parameter, target_parameter) in zip(self.critic_1.parameters(), self.critic_1_target.parameters()):
             target_parameter.data.copy_((1 - polyak) * parameter.data + polyak * target_parameter.data)
-
+        for (parameter, target_parameter) in zip(self.critic_2.parameters(), self.critic_2_target.parameters()):
+            target_parameter.data.copy_((1 - polyak) * parameter.data + polyak * target_parameter.data)
 
     def train(self, num_timesteps=50000, start_timesteps=1000):
         """Train the agent over a given number of episodes."""
         self.persistent_timesteps = 0
         timesteps = 0
 
-        self.reward_list.append(0)
-        self.timestep_list.append(0)
-
         print(f"Populating replay buffer with {start_timesteps} timesteps of experience...")
 
         while timesteps < start_timesteps:
-            elapsed_timesteps, _ = self.simulate_episode(should_learn=False)
+            elapsed_timesteps, start_rewards = self.simulate_episode(should_learn=False)
             timesteps += elapsed_timesteps
+
+            self.timestep_list.append(timesteps)
+            self.reward_list.append(start_rewards)
                 
         super().train(num_timesteps=num_timesteps, start_timesteps=start_timesteps)
 
-
     def simulate_episode(self, should_learn=True):
-        reward_total = 0
-
         state, _ = self.env.reset()
-        state = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
+        reward_total = 0
         timestep = 0
+        a_loss, c_loss = 0, 0
 
         # line 3 of pseudocode
         while True:
+
             timestep += 1
             self.persistent_timesteps += 1
 
             # line 4 of pseudocode
             if should_learn:
-                action = self.actor.sample(state)[0].detach().numpy()
-                new_state, reward, is_finished, is_truncated, _ = self.env.step(action[0])
+                with torch.no_grad():
+                    action = self.actor.sample(torch.tensor([state], dtype=torch.float32))[0].numpy()[0]
             else:
                 action = self.env.action_space.sample()
-                new_state, reward, is_finished, is_truncated, _ = self.env.step(action)
-
-            reward_total += reward
 
             # line 5-6 of pseudocode
-            new_state = torch.tensor(new_state, dtype=torch.float32).unsqueeze(0)
+            new_state, reward, is_finished, is_truncated, _ = self.env.step(action)
+            reward_total += reward
+            reward *= self.reward_scale
 
             # line 7 of pseudocode
-            self.replay_buffer.add(Experience(state.flatten(), new_state.flatten(), action, reward, is_finished))
+            self.replay_buffer.add(Experience(state, new_state, action, reward, is_finished))
+            state = new_state
 
-            # line 8 of pseudocode
+            # line 9-10 of pseudocode
+            if should_learn and self.persistent_timesteps % self.update_threshold == 0:
+                a_loss, c_loss = self.update_params()
+
+            # line 8 of pseudocode - swapped since we might as well update even if it's a terminal state and the logic is easier this way
             if is_finished or is_truncated:
                 break
 
-            # line 9 of pseudocode
-            if not should_learn or self.persistent_timesteps % self.update_threshold != 0:
-                continue
-
-            # lines 11-15 of pseudocode
-            self.update_params()
-            
-            state = new_state
-
+        print(f"Actor loss: {a_loss}, Critic loss: {c_loss}, Alpha: {self.alpha}")
         return timestep, reward_total
-    
 
     def update_params(self):
         # line 11 of pseudocode
@@ -266,23 +254,27 @@ class SACAgent(Agent):
         old_states = torch.tensor(old_states, dtype=torch.float32)
         new_states = torch.tensor(new_states, dtype=torch.float32)
         actions = torch.tensor(actions, dtype=torch.float32)
-        rewards = torch.tensor(rewards, dtype=torch.float32).unsqueeze(1)
-        terminals = torch.tensor(terminals, dtype=torch.float32).unsqueeze(1)
+        rewards = torch.tensor(rewards, dtype=torch.float32)
+        terminals = torch.tensor(terminals, dtype=torch.float32)
 
-        # line 12 of pseudocode
-        actor_prediction_new, log_actor_probability_new = self.actor.sample(new_states)
+        critic_1_evaluation = self.critic_1(old_states,actions)
+        critic_2_evaluation = self.critic_2(old_states,actions)
 
-        critic_target_1_prediction, critic_target_2_prediction = self.critic_targets.forward(new_states, actor_prediction_new)
-        critic_target_clipped = torch.min(critic_target_1_prediction, critic_target_2_prediction)
+        # need this or else temp tuning doesnt work, also speeds it up
+        with torch.no_grad():
+            # line 12 of pseudocode
+            actor_prediction_new, log_actor_probability_new = self.actor.sample(new_states)
 
-        predicted_target_reward = critic_target_clipped - self.alpha * log_actor_probability_new
-        target = rewards + self.gamma * (1 - terminals) * predicted_target_reward
+            critic_target_1_prediction = self.critic_1_target(new_states, actor_prediction_new)
+            critic_target_2_prediction = self.critic_2_target(new_states, actor_prediction_new)
+            critic_target_clipped = torch.min(critic_target_1_prediction, critic_target_2_prediction)
 
+            predicted_target_reward = (critic_target_clipped - self.alpha * log_actor_probability_new)
+            target = rewards + self.gamma * (1 - terminals) * predicted_target_reward
+        
         # line 13 of pseudocode
-        critic_1_evaluation, critic_2_evaluation = self.critics.forward(old_states, actions)
-
-        critic_1_loss = self.critic_1_loss(critic_1_evaluation, target)
-        critic_2_loss = self.critic_2_loss(critic_2_evaluation, target)
+        critic_1_loss = self.critic_1_loss(critic_1_evaluation,target)
+        critic_2_loss = self.critic_2_loss(critic_2_evaluation,target)
         total_critic_loss = critic_1_loss + critic_2_loss
 
         self.critics_optimiser.zero_grad()
@@ -291,65 +283,41 @@ class SACAgent(Agent):
 
         # line 14 of pseudocode
         actor_prediction_old, log_actor_probability_old = self.actor.sample(old_states)
-
-        critic_1_prediction, critic_2_prediction = self.critics.forward(old_states, actor_prediction_old)
+        critic_1_prediction = self.critic_1(old_states, actor_prediction_old)
+        critic_2_prediction = self.critic_2(old_states, actor_prediction_old)
         critic_clipped = torch.min(critic_1_prediction, critic_2_prediction)
 
-        actor_loss = self.actor_loss(critic_clipped, log_actor_probability_old, self.alpha)
+        actor_loss = self.actor_loss(critic_clipped,log_actor_probability_old,self.alpha)
+
+        if self.fixed_alpha is None:
+            alpha_loss = -(self.log_alpha * (log_actor_probability_old + self.target_entropy).detach()).mean()
+        else:
+            alpha_loss = None
 
         self.actor_optimiser.zero_grad()
         actor_loss.backward()
         self.actor_optimiser.step()
 
+        if self.fixed_alpha is None:
+            self.alpha_optimiser.zero_grad()
+            alpha_loss.backward()
+            self.alpha_optimiser.step()
+            self.alpha = self.log_alpha.exp()
+
+        # line 15 of pseudocode
         self.polyak_update(self.polyak)
 
-
+        return actor_loss.detach().numpy().item(), total_critic_loss.detach().numpy().item()
+    
     def predict(self, state):
-        return self.actor.sample(state.unsqueeze(0))[0].detach().numpy()[0]
-    
-
-    def save(self, path):
-        print(f"Saving model to {path}...")
-        with open(path, "wb") as file:
-            pickle.dump((self.actor.state_dict(), 
-                         self.critics.state_dict(), 
-                         self.critic_targets.state_dict(), 
-                         self.actor_optimiser.state_dict(),
-                         self.critics_optimiser.state_dict(),
-                         self.replay_buffer), file)
-
-    
-    def load(self, path):
-        if os.path.exists(path):
-            print(f"Loading model from {path}...")
-            with open(path, "rb") as file:
-                actor_dict, critics_dict, critic_targets_dict, actor_optim_dict, critics_optim_dict, self.replay_buffer = pickle.load(file)
-                self.actor.load_state_dict(actor_dict)
-                self.critics.load_state_dict(critics_dict)
-                self.critic_targets.load_state_dict(critic_targets_dict)
-                self.actor_optimiser.load_state_dict(actor_optim_dict)
-                self.critics_optimiser.load_state_dict(critics_optim_dict)
+        with torch.no_grad():
+            action = self.actor.forward(state.unsqueeze(0))
+            scaled_action = torch.tanh(action[0])*self.actor.action_max
+        return scaled_action.detach().numpy()[0]
 
 
-env = gym.make("Ant-v4", render_mode="rgb_array")
-SAVE_PATH = "sac_ant.data"
+if __name__ == "__main__":
+    env = gym.make("Ant-v4", render_mode="rgb_array")
+    agent = SACAgent(env,fixed_alpha=0.2,reward_scale=5.0,lr=3e-4,batch_size=256)
+    agent.train(num_timesteps=1_000_000,start_timesteps=10_000)
 
-agent = SACAgent(env)
-agent.load(SAVE_PATH)
-# agent.train(num_timesteps=50000, start_timesteps=0)
-# agent.save(SAVE_PATH)
-agent.render()
-
-# env.close()
-
-
-env = gym.make("Humanoid-v4", render_mode="rgb_array")
-SAVE_PATH = "sac_humanoid.data"
-
-agent = SACAgent(env)
-agent.load(SAVE_PATH)
-#agent.train(num_timesteps=150000, start_timesteps=0)
-#agent.save(SAVE_PATH)
-agent.render()
-
-env.close()

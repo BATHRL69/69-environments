@@ -1,10 +1,11 @@
+import cv2
 import torch
 import torch.nn as nn
 from torch.optim import Adam
 from torch.nn import ReLU
 import gymnasium as gym
 import copy
-from typing import Tuple, List
+from typing import Any, NamedTuple, Tuple, List
 import matplotlib.pyplot as plt
 import numpy as np
 import random
@@ -14,30 +15,77 @@ from agent import Agent
 
 random.seed(0)
 
-class ReplayBuffer:
+GLOBAL_TIMESTEPS = []
+GLOBAL_REWARDS = []
 
-    def __init__(self, max_buffer_size, sample_size):
-        self.max_buffer_size = max_buffer_size
-        self.sample_size = sample_size
-        self.buffer: List[Tuple] = []
 
-    def add(self, observation):
-        if len(self.buffer) >= self.max_buffer_size:
-            # randomly select an index
-            index = random.randint(0, len(self.buffer) - 1)
-            self.buffer[index] = observation
-        else:
-            self.buffer.append(observation)
 
-    def sample(self):
-        sample = []
-        indices_selected = set()
-        for i in range(self.sample_size):
-            index = random.randint(0, len(self.buffer) - 1)
-            while index in indices_selected:
-                index = random.randint(0, len(self.buffer) - 1)
-            sample.append(self.buffer[index])
-        return sample
+def make_video_td3(env_name,agent,save_path):
+    video_env = gym.make(env_name,render_mode="rgb_array")
+    print(f"Making video at {save_path}")
+    frames = []
+    state, _ = video_env.reset()
+    done = False
+    truncated = False
+
+    while not (done or truncated):
+        frame = video_env.render()
+        frames.append(frame)
+
+        # action = agent.predict(torch.Tensor(state))
+        # state, reward, done, truncated, info = env.step(action)
+        action = agent.actor.get_action(torch.Tensor([state]),test=False)
+        state, reward, done, truncated ,info = video_env.step(action[0].detach().numpy())
+
+    # Save frames as a video
+    height, width, _ = frames[0].shape
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    video = cv2.VideoWriter(save_path, fourcc, 30, (width, height))
+
+    for frame in frames:
+        video.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+
+    video.release()
+    video_env.close()
+
+
+class Experience(NamedTuple):
+    old_state: Any
+    new_state: Any
+    action: Any
+    reward: float
+    is_terminal: bool
+
+
+class ReplayBuffer():
+    def __init__(self, max_capacity: int, state_shape_size: int, action_space_size: int):
+        self.max_capacity = max_capacity
+        self.counter = 0
+
+        self.old_state_buffer = np.zeros((max_capacity, state_shape_size))
+        self.new_state_buffer = np.zeros((max_capacity, state_shape_size))
+        self.action_buffer = np.zeros((max_capacity, action_space_size))
+        self.reward_buffer = np.zeros(max_capacity)
+        self.is_terminal_buffer = np.zeros(max_capacity)     
+    
+
+    def add(self, experience: Experience):
+        idx = self.counter % self.max_capacity
+        self.counter += 1
+
+        self.old_state_buffer[idx] = experience.old_state
+        self.new_state_buffer[idx] = experience.new_state
+        self.action_buffer[idx] = experience.action
+        self.reward_buffer[idx] = experience.reward
+        self.is_terminal_buffer[idx] = experience.is_terminal
+    
+
+    def get(self, batch_size: int):
+        valid_entries = min(self.counter, self.max_capacity)
+        indices = np.random.choice(list(range(valid_entries)), batch_size)
+        return self.old_state_buffer[indices], self.new_state_buffer[indices], self.action_buffer[indices], self.reward_buffer[indices], self.is_terminal_buffer[indices]
+
+
 
 class TD3Agent(Agent):
 
@@ -46,17 +94,18 @@ class TD3Agent(Agent):
     def __init__(
             self,
             env,
-            max_buffer_size: int = 100000,
-            replay_sample_size: int = 10,
-            actor_lr: float = 0.001,
-            critic_lr: float = 0.001,
+            max_buffer_size: int = 1000000,
+            replay_sample_size: int = 256,
+            actor_lr: float = 0.0003,
+            critic_lr: float = 0.0003,
             polyak: float = 0.995,
             gamma: float = 0.99,
-            training_frequency: int = 10,
+            training_frequency: int = 1,
             actor_update_frequency: int = 2,
             target_noise=0.2, 
             noise_clip=0.5,
-            num_train_episodes: int = 100000
+            num_train_episodes: int = 100000,
+            make_video = False
     ):
         # set hyperparams
         self.max_buffer_size = max_buffer_size
@@ -70,6 +119,7 @@ class TD3Agent(Agent):
         self.actor_target_noise = target_noise
         self.actor_noise_clip = noise_clip
         self.num_train_episodes = num_train_episodes
+        self.make_video = make_video
 
         # set up environment
         self.env = env
@@ -78,7 +128,8 @@ class TD3Agent(Agent):
         self.act_limit_low: int = self.env.action_space.low[0]
         state_dim: int = self.env.observation_space.shape[0]
 
-        self.replay_buffer = ReplayBuffer(self.max_buffer_size, self.replay_sample_size)
+        self.replay_buffer = ReplayBuffer(self.max_buffer_size,state_dim,action_dim)
+
 
         # policy
         self.actor = ActorNetwork(
@@ -136,29 +187,30 @@ class TD3Agent(Agent):
         # extract observations from data
         loss_q1 = 0
         loss_q2 = 0
+        #this is batched now
+        current_states, next_states, actions, rewards, terminals = data
+        current_states = torch.Tensor(current_states)
+        next_states = torch.Tensor(next_states)
+        actions = torch.Tensor(actions)
+        rewards = torch.Tensor(rewards).unsqueeze(1)
+        terminals = torch.Tensor(terminals).unsqueeze(1)
 
-        N = len(data)
+        pred_q1 = self.critic_1.predict(current_states, actions)
+        pred_q2 = self.critic_2.predict(current_states, actions)
 
-        for observation in data:
-            current_state, action, reward, next_state, terminal = observation
+        eps = torch.randn(actions.shape) * self.actor_target_noise
+        eps = torch.clamp(eps, -self.actor_noise_clip, self.actor_noise_clip)
 
-            pred_q1 = self.critic_1.predict(current_state, action)
-            pred_q2 = self.critic_2.predict(current_state, action)
+        noised_target_action = self.target_actor.predict(next_states) + eps
+        noised_target_action = torch.clamp(noised_target_action, self.act_limit_low, self.act_limit_high)
 
-            eps = torch.randn(action.shape) * self.actor_target_noise
-            eps = torch.clamp(eps, -self.actor_noise_clip, self.actor_noise_clip)
+        true = (rewards + self.gamma*(1 - terminals)*self.get_min_target_q_value(next_states, noised_target_action))
 
-            noised_target_action = self.target_actor.predict(next_state) + eps
-            noised_target_action = torch.clamp(noised_target_action, self.act_limit_low, self.act_limit_high)
-
-            true = (reward + self.gamma*(1 - terminal)*self.get_min_target_q_value(next_state, noised_target_action))
-
-            loss_q1 += (pred_q1 - true)**2
-            loss_q2 += (pred_q2 - true)**2
+        loss_q1 += (pred_q1 - true)**2
+        loss_q2 += (pred_q2 - true)**2
             
-        if (N != 0):
-            loss_q1 = loss_q1 / N
-            loss_q2 = loss_q2 / N
+        loss_q1 = torch.mean(loss_q1)
+        loss_q2 = torch.mean(loss_q2)
 
         return loss_q1, loss_q2
     
@@ -182,16 +234,11 @@ class TD3Agent(Agent):
     
 
     def actor_loss(self, data):
-        N = len(data)
         loss = 0
-
-        for observation in data: 
-            current_state, action, reward, next_state, terminal = observation
-            loss += -(self.get_min_q_value(current_state, self.actor.predict(current_state)))
-
-        if (N != 0):
-            loss = loss / N
-
+        #this is batched now
+        current_state, next_state, action, reward, terminal = data
+        loss += -(self.get_min_q_value(current_state, self.actor.get_action(current_state)))
+        loss = torch.mean(loss)
         return loss 
 
     def train(self, start_steps=100):
@@ -202,7 +249,8 @@ class TD3Agent(Agent):
             rand_a = self.env.action_space.sample()
             new_s, reward, terminated, truncated, *args = self.env.step(rand_a)
             done = terminated or truncated
-            self.replay_buffer.add((last_s, rand_a, reward, new_s, done))
+            experience = Experience(last_s,new_s,rand_a,reward,done)
+            self.replay_buffer.add(experience)
             if done:
                 last_s, _ = self.env.reset()
             else:
@@ -215,7 +263,10 @@ class TD3Agent(Agent):
         alive = 0
         lives = 0
         for episode in tqdm(range(self.num_train_episodes)):
-
+            
+            if episode in {10000,100000,200000,500000,999999} and self.make_video:
+                save_path_str = "new_td3_ant_"+str(episode)+".mp4"
+                make_video_td3("Ant-v4",self,save_path_str)
             # action -> numpy array
             a = self.actor.predict(last_s).detach().numpy()
 
@@ -225,10 +276,13 @@ class TD3Agent(Agent):
             new_s, reward, terminated, truncated, *args = self.env.step(a)
             total_reward += reward
             done = terminated or truncated
-            self.replay_buffer.add((last_s, a, reward, new_s, done))
+            experience = Experience(last_s,new_s,a,reward,done)
+            self.replay_buffer.add(experience)
             if done:
                 last_s, _ = self.env.reset()
                 episodic_rewards.append(total_reward)
+                GLOBAL_REWARDS.append(total_reward)
+                GLOBAL_TIMESTEPS.append(episode)
                 # print(lives, "attempt:\n", "died after ", alive, " steps", "total reward", total_reward, "\n")
                 total_reward = 0
                 alive = 0
@@ -242,30 +296,30 @@ class TD3Agent(Agent):
                 self.update_weights((episode % self.actor_update_frequency == 0))
 
         
-        # Plot the episodic curve
-        plt.plot(range(len(episodic_rewards)), episodic_rewards, label="Episodic rewards")
-        plt.xlabel("Episodes")
-        plt.ylabel("Total reward")
-        plt.legend()
-        plt.show()
+        # # Plot the episodic curve
+        # plt.plot(range(len(episodic_rewards)), episodic_rewards, label="Episodic rewards")
+        # plt.xlabel("Episodes")
+        # plt.ylabel("Total reward")
+        # plt.legend()
+        # plt.show()
 
-        # Plot the critic loss curve
-        plt.plot(range(len(self.critic_losses_1)), self.critic_losses_1, label="Critic loss")
-        plt.xlabel("Episodes")
-        plt.ylabel("Critic Losses")
-        plt.legend()
-        plt.show()
+        # # Plot the critic loss curve
+        # plt.plot(range(len(self.critic_losses_1)), self.critic_losses_1, label="Critic loss")
+        # plt.xlabel("Episodes")
+        # plt.ylabel("Critic Losses")
+        # plt.legend()
+        # plt.show()
 
-        # Plot the actor loss curve
-        plt.plot(range(len(self.actor_losses)), self.actor_losses, label="Actor loss")
-        plt.xlabel("Episodes")
-        plt.ylabel("Actor Losses")
-        plt.legend()
-        plt.show()
+        # # Plot the actor loss curve
+        # plt.plot(range(len(self.actor_losses)), self.actor_losses, label="Actor loss")
+        # plt.xlabel("Episodes")
+        # plt.ylabel("Actor Losses")
+        # plt.legend()
+        # plt.show()
 
     def update_weights(self, update_actor):
         
-        samples = self.replay_buffer.sample()
+        samples = self.replay_buffer.get(self.replay_sample_size)
         self.actor_optimiser.zero_grad()
         self.critic_optimiser_1.zero_grad()
         self.critic_optimiser_2.zero_grad()
@@ -329,7 +383,7 @@ class ActorNetwork(nn.Module):
         layers.append(nn.Linear(input_size, hidden_size[0])) # input layer
         layers.append(activation)
 
-        for i in range(0, len(hidden_size) - 2):
+        for i in range(0, len(hidden_size) - 1):
             layers.append(nn.Linear(hidden_size[i], hidden_size[i + 1]))
             layers.append(activation)
 
@@ -370,7 +424,7 @@ class CriticNetwork(nn.Module):
         layers.append(nn.Linear(input_size, hidden_size[0])) # input layer
         layers.append(activation)
 
-        for i in range(0, len(hidden_size) - 2):
+        for i in range(0, len(hidden_size) - 1):
             layers.append(nn.Linear(hidden_size[i], hidden_size[i+1]))
             layers.append(activation)
 
@@ -385,7 +439,7 @@ class CriticNetwork(nn.Module):
 
         state = torch.as_tensor(state, dtype=torch.float32)
         action = torch.as_tensor(action, dtype=torch.float32)
-        x = torch.concatenate((action, state))
+        x = torch.concatenate([state, action],dim=1)
         return self.forward(x)
     
 
