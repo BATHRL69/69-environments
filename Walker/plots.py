@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import pandas as pd
 
 #LOADING DATA
 dpo_timesteps = np.load('dpo_ant_timesteps_1000000_0.npy')
@@ -153,35 +154,6 @@ sac_tuned_rewards_aligned = interpolate_rewards(
 sac_tuned_mean = sac_tuned_rewards_aligned.mean(axis=0)
 sac_tuned_std = sac_tuned_rewards_aligned.std(axis=0)
 
-# plt.figure(figsize=(10, 6))
-
-# plt.plot(common_timesteps, random_mean, label="Random", color="black")
-# plt.fill_between(common_timesteps, random_mean - random_std, random_mean + random_std, color="black", alpha=0.2)
-
-# plt.plot(common_timesteps, ddpg_mean, label="DDPG", color="blue")
-# plt.fill_between(common_timesteps, ddpg_mean - ddpg_std, ddpg_mean + ddpg_std, color="blue", alpha=0.2)
-
-# plt.plot(common_timesteps, td3_mean, label="TD3", color="green")
-# plt.fill_between(common_timesteps, td3_mean - td3_std, td3_mean + td3_std, color="green", alpha=0.2)
-
-# plt.plot(common_timesteps, sac_mean, label="SAC", color="red")
-# plt.fill_between(common_timesteps, sac_mean - sac_std, sac_mean + sac_std, color="red", alpha=0.2)
-
-# plt.plot(common_timesteps, sac_tuned_mean, label="SAC (Tuned)", color="orange")
-# plt.fill_between(common_timesteps, sac_tuned_mean - sac_tuned_std, sac_tuned_mean + sac_tuned_std, color="orange", alpha=0.2)
-
-# plt.plot(common_timesteps, dpo_mean, label="DPO", color="brown")
-# plt.fill_between(common_timesteps, dpo_mean - dpo_std, dpo_mean + dpo_std, color="brown", alpha=0.2)
-
-# plt.plot(common_timesteps, ppo_mean, label="PPO", color="purple")
-# plt.fill_between(common_timesteps, ppo_mean - ppo_std, ppo_mean + ppo_std, color="purple", alpha=0.2)
-
-# plt.xlabel("Timesteps")
-# plt.ylabel("Average Reward")
-# plt.legend()
-# plt.grid()
-# plt.show()
-
 # Humanoid
 
 humanoid_random_timesteps = np.load("random_humanoid_timesteps_1000000_0.npy")
@@ -267,56 +239,6 @@ humanoid_sac_tuned_rewards_aligned = interpolate_rewards(
 humanoid_sac_tuned_mean = humanoid_sac_tuned_rewards_aligned.mean(axis=0)
 humanoid_sac_tuned_std = humanoid_sac_tuned_rewards_aligned.std(axis=0)
 
-# # plotting with mean and std
-# plt.figure(figsize=(10, 6))
-
-# plt.plot(common_timesteps, humanoid_random_mean, label="Random", color="black")
-# plt.fill_between(common_timesteps, humanoid_random_mean - humanoid_random_std, humanoid_random_mean + humanoid_random_std, color="black", alpha=0.2)
-
-# plt.plot(common_timesteps, humanoid_td3_mean, label="TD3", color="green")
-# plt.fill_between(common_timesteps, humanoid_td3_mean - humanoid_td3_std, humanoid_td3_mean + humanoid_td3_std, color="green", alpha=0.2)
-
-# plt.plot(common_timesteps, humanoid_sac_mean, label="SAC", color="red")
-# plt.fill_between(common_timesteps, humanoid_sac_mean - humanoid_sac_std, humanoid_sac_mean + humanoid_sac_std, color="red", alpha=0.2)
-
-# plt.plot(common_timesteps, humanoid_sac_tuned_mean, label="SAC (Tuned)", color="orange")
-# plt.fill_between(common_timesteps, humanoid_sac_tuned_mean - humanoid_sac_tuned_std, humanoid_sac_tuned_mean + humanoid_sac_tuned_std, color="orange", alpha=0.2)
-
-
-# plt.xlabel("Timesteps")
-# plt.ylabel("Average Reward")
-# plt.legend()
-# plt.grid()
-# plt.show()
-
-# plt.figure(figsize=(10, 6))
-
-# plt.plot(common_timesteps, random_mean, label="Random", color="black")
-# plt.fill_between(common_timesteps, random_mean - random_std, random_mean + random_std, color="black", alpha=0.2)
-
-# plt.plot(common_timesteps, ddpg_mean, label="DDPG", color="blue")
-# plt.fill_between(common_timesteps, ddpg_mean - ddpg_std, ddpg_mean + ddpg_std, color="blue", alpha=0.2)
-
-# plt.plot(common_timesteps, td3_mean, label="TD3", color="green")
-# plt.fill_between(common_timesteps, td3_mean - td3_std, td3_mean + td3_std, color="green", alpha=0.2)
-
-# plt.plot(common_timesteps, sac_mean, label="SAC", color="red")
-# plt.fill_between(common_timesteps, sac_mean - sac_std, sac_mean + sac_std, color="red", alpha=0.2)
-
-# plt.plot(common_timesteps, sac_tuned_mean, label="SAC (Tuned)", color="orange")
-# plt.fill_between(common_timesteps, sac_tuned_mean - sac_tuned_std, sac_tuned_mean + sac_tuned_std, color="orange", alpha=0.2)
-
-# plt.plot(common_timesteps, dpo_mean, label="DPO", color="brown")
-# plt.fill_between(common_timesteps, dpo_mean - dpo_std, dpo_mean + dpo_std, color="brown", alpha=0.2)
-
-# plt.plot(common_timesteps, ppo_mean, label="PPO", color="purple")
-# plt.fill_between(common_timesteps, ppo_mean - ppo_std, ppo_mean + ppo_std, color="purple", alpha=0.2)
-
-# plt.xlabel("Timesteps")
-# plt.ylabel("Average Reward")
-# plt.legend()
-# plt.grid()
-# plt.show()
 plt.rcParams.update({'font.size': 20})
 fig, axs = plt.subplots(1, 2, figsize=(20, 6))
 
@@ -449,8 +371,6 @@ sac_tuned_max_std_reward = sac_tuned_std[sac_tuned_max_reward_loc]
 random_max_reward_loc = np.argmax(random_mean)
 random_max_mean_reward = random_mean[random_max_reward_loc]
 random_max_std_reward = random_std[random_max_reward_loc]
-
-import pandas as pd
 
 methods = ["SAC", "PPO", "DPO", "DDPG", "TD3", "SAC (Tuned)","Random"]
 data = [

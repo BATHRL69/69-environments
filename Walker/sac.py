@@ -1,15 +1,8 @@
-from copy import deepcopy
-import itertools
-import cv2
 import gymnasium as gym
 import numpy as np
-import os
-import pickle
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import torch.nn.functional as F
-from torch.distributions.normal import Normal
 
 from agent import Agent
 from typing import NamedTuple, Any
@@ -107,6 +100,7 @@ class SACPolicyNetwork(nn.Module):
 
         # epsilon is to avoid log 0, nans bad
         epsilon = 1e-6
+        # tanh above squashes distribution, so we need to adjust log probs accordingly. This is Eq 21 in SAC paper 
         log_probs -= torch.log(self.action_max * (1 - sampled_action.pow(2)) + epsilon)
         log_probs = log_probs.sum(dim=1, keepdim=True)
     
@@ -139,7 +133,6 @@ class SACValueNetwork(nn.Module):
 
         return torch.squeeze(action_value_estimate_1)
 
-## WORKING AGENT
 class SACAgent(Agent):
     def __init__(self, env: gym.Env, update_threshold: int=1, batch_size: int=256, lr: float=3e-4, gamma: float=0.99, polyak=0.995, fixed_alpha=None,reward_scale:float=5):
         super(SACAgent, self).__init__(env)
@@ -202,8 +195,11 @@ class SACAgent(Agent):
         print(f"Populating replay buffer with {start_timesteps} timesteps of experience...")
 
         while timesteps < start_timesteps:
-            elapsed_timesteps, _ = self.simulate_episode(should_learn=False)
+            elapsed_timesteps, start_rewards = self.simulate_episode(should_learn=False)
             timesteps += elapsed_timesteps
+
+            self.timestep_list.append(timesteps)
+            self.reward_list.append(start_rewards)
                 
         super().train(num_timesteps=num_timesteps, start_timesteps=start_timesteps)
 
@@ -213,7 +209,6 @@ class SACAgent(Agent):
         reward_total = 0
         timestep = 0
         a_loss,c_loss = 0,0
-
 
         # line 3 of pseudocode
         while True:
@@ -257,18 +252,21 @@ class SACAgent(Agent):
         critic_1_evaluation = self.critic_1(old_states,actions)
         critic_2_evaluation = self.critic_2(old_states,actions)
 
-        actor_prediction_new, log_actor_probability_new = self.actor.sample(new_states)
+        # need this or else temp tuning doesnt work, also speeds it up
+        with torch.no_grad():
+            actor_prediction_new, log_actor_probability_new = self.actor.sample(new_states)
 
-        critic_target_1_prediction = self.critic_1_target(new_states, actor_prediction_new)
-        critic_target_2_prediction = self.critic_2_target(new_states, actor_prediction_new)
-        critic_target_clipped = torch.min(critic_target_1_prediction, critic_target_2_prediction)
+            critic_target_1_prediction = self.critic_1_target(new_states, actor_prediction_new)
+            critic_target_2_prediction = self.critic_2_target(new_states, actor_prediction_new)
+            critic_target_clipped = torch.min(critic_target_1_prediction, critic_target_2_prediction)
 
-        predicted_target_reward = (critic_target_clipped - self.alpha * log_actor_probability_new)
-        target = rewards + self.gamma * (1 - terminals) * predicted_target_reward
+            predicted_target_reward = (critic_target_clipped - self.alpha * log_actor_probability_new)
+            target = rewards + self.gamma * (1 - terminals) * predicted_target_reward
         
         critic_1_loss = self.critic_1_loss(critic_1_evaluation,target)
         critic_2_loss = self.critic_2_loss(critic_2_evaluation,target)
         total_critic_loss = critic_1_loss + critic_2_loss
+
         self.critics_optimiser.zero_grad()
         total_critic_loss.backward()
         self.critics_optimiser.step()
@@ -299,43 +297,15 @@ class SACAgent(Agent):
 
         return actor_loss.detach().numpy().item(),total_critic_loss.detach().numpy().item()
     
-    # def predict(self, state):
-    #     with torch.no_grad():
-    #         action = self.actor.forward(state.unsqueeze(0))
-    #         scaled_action = torch.tanh(action[0])*self.actor.action_max
-    #     return scaled_action.detach().numpy()[0]
-    
-    # def save(self, path):
-    #     print(f"Saving model to {path}...")
-    #     with open(path, "wb") as file:
-    #         pickle.dump((self.actor.state_dict(), 
-    #                      self.critics.state_dict(), 
-    #                      self.critic_targets.state_dict(), 
-    #                      self.actor_optimiser.state_dict(),
-    #                      self.critics_optimiser.state_dict(),
-    #                      self.replay_buffer), file)
+    def predict(self, state):
+        with torch.no_grad():
+            action = self.actor.forward(state.unsqueeze(0))
+            scaled_action = torch.tanh(action[0])*self.actor.action_max
+        return scaled_action.detach().numpy()[0]
 
-    # def load(self, path):
-    #     if os.path.exists(path):
-    #         print(f"Loading model from {path}...")
-    #         with open(path, "rb") as file:
-    #             actor_dict, critics_dict, critic_targets_dict, actor_optim_dict, critics_optim_dict, self.replay_buffer = pickle.load(file)
-    #             self.actor.load_state_dict(actor_dict)
-    #             self.critics.load_state_dict(critics_dict)
-    #             self.critic_targets.load_state_dict(critic_targets_dict)
-    #             self.actor_optimiser.load_state_dict(actor_optim_dict)
-    #             self.critics_optimiser.load_state_dict(critics_optim_dict)
 
 if __name__ == "__main__":
+    env = gym.make("Ant-v4", render_mode="rgb_array")
+    agent = SACAgent(env,fixed_alpha=0.2,reward_scale=5.0,lr=3e-4,batch_size=256)
+    agent.train(num_timesteps=1_000_000,start_timesteps=10_000)
 
-    for i in range(1):
-        # make_video = True if i==0 else False
-        env = gym.make("Ant-v4", render_mode="rgb_array")
-        agent = SACAgent(env,fixed_alpha=0.2,reward_scale=5.0,lr=3e-4,batch_size=256)
-        agent.train(1_000_000,10_000)
-   
-        # np.save("sac_tuned_ant_timesteps_1000000_"+str(i)+".npy", np.array(agent.timestep_list))
-        # np.save("sac_tuned_ant_rewards_1000000_"+str(i)+".npy", np.array(agent.reward_list))
-        # make_video_sample("Ant-v4",agent,"sac_tuned_ant_1000000_"+str(i)+".mp4")
-        np.save("sac_og_nottuned_v2_timesteps.npy", np.array(agent.timestep_list))
-        np.save("sac_og_nottuned_v2_rewards.npy", np.array(agent.reward_list))
