@@ -7,6 +7,13 @@ import torch.optim as optim
 from agent import Agent
 from typing import NamedTuple, Any
 
+# ===========================================================
+#
+# SAC implementation based on OpenAI Spinning Up pseudocode
+# https://spinningup.openai.com/en/latest/algorithms/sac.html
+#
+# ===========================================================
+
 class Experience(NamedTuple):
     old_state: Any
     new_state: Any
@@ -43,7 +50,6 @@ class ReplayBuffer():
 class SACPolicyLoss(nn.Module):
     def __init__(self):
         super(SACPolicyLoss, self).__init__()
-    
 
     def forward(self, min_critic, entropy, alpha):
         # gradient ASCENT - negate the loss function in the pseudocode, since our optimiser will perform gradient DESCENT
@@ -68,16 +74,14 @@ class SACPolicyNetwork(nn.Module):
         self.mean = nn.Linear(self._hidden_units, self._action_dim)
         self.log_std = nn.Linear(self._hidden_units, self._action_dim)
 
-
     def forward(self, state:torch.Tensor)->torch.Tensor:
         hidden_values = self.ann(state)
         mean = self.mean(hidden_values)
         log_std = self.log_std(hidden_values)
-        # standard clamping
+        # seems like these are standard values to use for clamping
         log_std = torch.clamp(log_std, min=-20, max=2)
 
         return mean, log_std
-    
 
     def sample(self, state:torch.Tensor)->torch.Tensor:
         ## One issue that was encountered was when trying to do just the std
@@ -98,9 +102,10 @@ class SACPolicyNetwork(nn.Module):
         log_2pi = torch.log(torch.Tensor([2 * torch.pi]))
         log_probs = -0.5 * (((probabilities - mean) / std).pow(2) + 2 * log_std + log_2pi)
 
-        # epsilon is to avoid log 0, nans bad
+        # epsilon is to avoid log 0 and subsequent NaN propagation
         epsilon = 1e-6
-        # tanh above squashes distribution, so we need to adjust log probs accordingly. This is Eq 21 in SAC paper 
+
+        # tanh above squashes distribution to (-1, 1), so we need to adjust log probs accordingly. This is Eq 21 in SAC paper 
         log_probs -= torch.log(self.action_max * (1 - sampled_action.pow(2)) + epsilon)
         log_probs = log_probs.sum(dim=1, keepdim=True)
     
@@ -123,10 +128,9 @@ class SACValueNetwork(nn.Module):
             nn.Linear(self._hidden_dim, 1),
         )
 
-
     def forward(self, state:torch.Tensor, action:torch.Tensor)->torch.Tensor:
-        # Assuming batch is dim=0, so state is shape [batch,state_space]
-        # action is [batch,action_space]
+        # Assuming batch is dim=0, so state is shape [batch_size, state_space]
+        # And action is [batch_size, action_space]
 
         network_input = torch.cat([state, action], dim=1)
         action_value_estimate_1 = self.ann1(network_input) # estimate the value of an action in a state
@@ -170,10 +174,11 @@ class SACAgent(Agent):
         self.critics_optimiser = optim.Adam(list(self.critic_1.parameters())+list(self.critic_2.parameters()), lr=lr)
         
         self.fixed_alpha = fixed_alpha
+
         if fixed_alpha is None:
             self.log_alpha = torch.tensor(0.0, requires_grad=True)
             self.alpha_optimiser = optim.Adam([self.log_alpha], lr=lr)
-            self.target_entropy = -action_space_shape
+            self.target_entropy = -action_space_shape # standard value from hyperparameters appendix of https://arxiv.org/abs/1812.05905
             self.alpha = self.log_alpha.exp().item()
         else:
             self.alpha = fixed_alpha
@@ -204,11 +209,10 @@ class SACAgent(Agent):
         super().train(num_timesteps=num_timesteps, start_timesteps=start_timesteps)
 
     def simulate_episode(self, should_learn=True):
-
         state, _ = self.env.reset()
         reward_total = 0
         timestep = 0
-        a_loss,c_loss = 0,0
+        a_loss, c_loss = 0, 0
 
         # line 3 of pseudocode
         while True:
@@ -223,24 +227,28 @@ class SACAgent(Agent):
             else:
                 action = self.env.action_space.sample()
 
+            # line 5-6 of pseudocode
             new_state, reward, is_finished, is_truncated, _ = self.env.step(action)
             reward_total += reward
+            reward *= self.reward_scale
 
-            reward*=self.reward_scale
+            # line 7 of pseudocode
             self.replay_buffer.add(Experience(state, new_state, action, reward, is_finished))
-            state=new_state
+            state = new_state
 
-            if should_learn and self.persistent_timesteps%self.update_threshold==0:
-                a_loss,c_loss = self.update_params()
+            # line 9-10 of pseudocode
+            if should_learn and self.persistent_timesteps % self.update_threshold == 0:
+                a_loss, c_loss = self.update_params()
 
+            # line 8 of pseudocode - swapped since we might as well update even if it's a terminal state and the logic is easier this way
             if is_finished or is_truncated:
                 break
 
-        print(f"Actor loss: {a_loss} Critic loss: {c_loss} Alpha:{self.alpha}")
+        print(f"Actor loss: {a_loss}, Critic loss: {c_loss}, Alpha: {self.alpha}")
         return timestep, reward_total
 
     def update_params(self):
-
+        # line 11 of pseudocode
         old_states, new_states, actions, rewards, terminals = self.replay_buffer.get(self.batch_size)
 
         old_states = torch.tensor(old_states, dtype=torch.float32)
@@ -254,6 +262,7 @@ class SACAgent(Agent):
 
         # need this or else temp tuning doesnt work, also speeds it up
         with torch.no_grad():
+            # line 12 of pseudocode
             actor_prediction_new, log_actor_probability_new = self.actor.sample(new_states)
 
             critic_target_1_prediction = self.critic_1_target(new_states, actor_prediction_new)
@@ -263,6 +272,7 @@ class SACAgent(Agent):
             predicted_target_reward = (critic_target_clipped - self.alpha * log_actor_probability_new)
             target = rewards + self.gamma * (1 - terminals) * predicted_target_reward
         
+        # line 13 of pseudocode
         critic_1_loss = self.critic_1_loss(critic_1_evaluation,target)
         critic_2_loss = self.critic_2_loss(critic_2_evaluation,target)
         total_critic_loss = critic_1_loss + critic_2_loss
@@ -271,6 +281,7 @@ class SACAgent(Agent):
         total_critic_loss.backward()
         self.critics_optimiser.step()
 
+        # line 14 of pseudocode
         actor_prediction_old, log_actor_probability_old = self.actor.sample(old_states)
         critic_1_prediction = self.critic_1(old_states, actor_prediction_old)
         critic_2_prediction = self.critic_2(old_states, actor_prediction_old)
@@ -293,9 +304,10 @@ class SACAgent(Agent):
             self.alpha_optimiser.step()
             self.alpha = self.log_alpha.exp()
 
+        # line 15 of pseudocode
         self.polyak_update(self.polyak)
 
-        return actor_loss.detach().numpy().item(),total_critic_loss.detach().numpy().item()
+        return actor_loss.detach().numpy().item(), total_critic_loss.detach().numpy().item()
     
     def predict(self, state):
         with torch.no_grad():
