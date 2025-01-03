@@ -474,7 +474,6 @@ class PPOAgent(Agent):
         """
         timesteps = 0
         episodes = 0
-        torch.autograd.set_detect_anomaly(True)
         while timesteps < num_iterations:
             # self.policy_network.update_std(timesteps, num_iterations)
             elapsed_timesteps, reward = (
@@ -646,7 +645,7 @@ class DPOAgent(PPOAgent):
 
         self.policy_optimiser.zero_grad()
         policy_loss.backward()
-        torch.nn.utils.clip_grad_norm_(self.policy_network.parameters(), max_norm=1.0)
+        # torch.nn.utils.clip_grad_norm_(self.policy_network.parameters(), max_norm=1.0)
         self.policy_optimiser.step()
 
         # Line 7 in pseudocode
