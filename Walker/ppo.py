@@ -42,25 +42,25 @@ class PPOPolicyNetwork(nn.Module):
             nn.ReLU(),
             nn.Linear(256, 256),
             nn.ReLU(),
-            nn.Linear(256, action_space),
         )
-        self.max_std = std
-        self.log_std = np.log(std)
+        self.mean = nn.Linear(256, action_space)
+        self.log_std = nn.Linear(256, action_space)
+        self.action_max = 1
 
-    def update_std(self, timesteps_through, total_timesteps):
-        """Update STD over training, to encourage exploration at the start, and then hone in on correct actions neared the end
+    # def update_std(self, timesteps_through, total_timesteps):
+    #     """Update STD over training, to encourage exploration at the start, and then hone in on correct actions neared the end
 
-        Args:
-            timesteps_through (int): Amount of timesteps through at curent point in training
-            total_timesteps (int): Total timesteps for training
-        """
-        min_std = 0.05
-        new_std = (
-            self.max_std
-            - (self.max_std - min_std) * (timesteps_through / total_timesteps)
-        ) + 0.0001  # Ensure it never gets to 0, this will give us nans
-        new_std = 0.20
-        self.log_std = torch.tensor(np.log(new_std))
+    #     Args:
+    #         timesteps_through (int): Amount of timesteps through at curent point in training
+    #         total_timesteps (int): Total timesteps for training
+    #     """
+    #     min_std = 0.05
+    #     new_std = (
+    #         self.max_std
+    #         - (self.max_std - min_std) * (timesteps_through / total_timesteps)
+    #     ) + 0.0001  # Ensure it never gets to 0, this will give us nans
+    #     new_std = 0.20
+    #     self.log_std = torch.tensor(np.log(new_std))
 
     def get_distribution(self, state):
         """Returns a normal distribution, from actions given state
@@ -84,34 +84,59 @@ class PPOPolicyNetwork(nn.Module):
         Returns:
             torch.tensor: action, probability
         """
-        # action_values = self.network(state)
-        distribution = self.get_distribution(state)
-        action = distribution.sample()
-        probability = distribution.log_prob(action).sum(dim=-1)
-        return action, probability
+        mean, log_std = self.forward(state)
+        std = torch.exp(log_std)
+        noise = torch.randn_like(std)
+        probabilities = mean + std * noise
+        sampled_action = torch.tanh(probabilities)
+
+        # tanh outputs between -1 and 1, so multiply by action_max to map it to the action space
+        scaled_action = sampled_action * self.action_max
+
+        log_2pi = torch.log(torch.Tensor([2 * torch.pi]))
+        log_probs = -0.5 * (
+            ((probabilities - mean) / std).pow(2) + 2 * log_std + log_2pi
+        )
+
+        # one reason for epsilon is to avoid log 0, apparently theres other reasons
+        # also idk what this term actually is but they use it in the paper
+        epsilon = 1e-6
+        log_probs -= torch.log(self.action_max * (1 - sampled_action.pow(2)) + epsilon)
+        log_probs = log_probs.sum(dim=-1, keepdim=True)
+
+        # could get it to return mean as the 'optimal' action during evaluation?
+        return scaled_action, log_probs
 
     def get_probability_given_action(self, state, action):
-        """Takes in the state and action, and returns the log probability of that action, given the state. So P(A|S), assuming a normal distribution
+        """ """
+        scaled_action = action / self.action_max
+        scaled_action = torch.clamp(scaled_action, -0.999999, 0.999999)
 
-        Args:
-            state (torch.Tensor): The current state
-            action (torch.Tensor): The action to be taken in this state
+        pre_tanh = 0.5 * (torch.log(1 + scaled_action) - torch.log(1 - scaled_action))
 
-        Returns:
-            torch.Tensor: the log-probability of action given state
-        """
-        # action_values = self.network(state)
-        distribution = self.get_distribution(state)
-        log_probs = distribution.log_prob(action).sum(dim=-1)
+        mean, log_std = self.forward(state)
+        std = torch.exp(log_std)
 
-        return log_probs  # We can do sum here because they are LOG probs, usually our conditional probability would be x * y.
-        # We are doing exp to turn our log_prob into probability 0-1. Will do torch.exp in probability ratio method to return this to between 0 and 1
+        log_2pi = torch.log(torch.tensor([2 * torch.pi], device=state.device))
+        log_probs = -0.5 * (((pre_tanh - mean) / std).pow(2) + 2 * log_std + log_2pi)
+
+        epsilon = 1e-6
+        log_probs -= torch.log(self.action_max * (1 - scaled_action.pow(2)) + epsilon)
+
+        log_probs = log_probs.sum(dim=-1, keepdim=False)
+        return log_probs
 
     def evaluate(self, state, action):
         pass
 
-    def forward(self, state):
-        return self.network(state)
+    def forward(self, state: torch.Tensor) -> torch.Tensor:
+        hidden_values = self.network(state)
+        mean = self.mean(hidden_values)
+        log_std = self.log_std(hidden_values)
+        # they clamp this between -20 and 2 in the paper i believe
+        log_std = torch.clamp(log_std, min=-20, max=2)
+
+        return mean, log_std
 
 
 class PPOValueNetwork(nn.Module):
@@ -204,13 +229,19 @@ class PPOAgent(Agent):
         current_log_prob = self.policy_network.get_probability_given_action(
             state, action
         )
+
         old_log_prob = self.old_policy_network.get_probability_given_action(
             state, action
         )
 
-        return torch.exp(
-            current_log_prob - old_log_prob
-        )  # This formula is P(A|S) / P_old(A|S) but we can do - since they are log probability
+        current_log_prob = torch.clamp(current_log_prob, min=-20, max=20)
+        old_log_prob = torch.clamp(old_log_prob, min=-20, max=20)
+        log_ratio = current_log_prob - old_log_prob
+        ratio = torch.exp(log_ratio)
+
+        ratio = torch.clamp(ratio, min=1e-10, max=1e10)
+
+        return ratio  # This formula is P(A|S) / P_old(A|S) but we can do - since they are log probability
 
     def state_action_values_mc(self, rewards):
         """Compute Q value, this is the value of taking a state, and action, and then following the policy thereafter
@@ -260,7 +291,7 @@ class PPOAgent(Agent):
         values = values[:-1]
         advantages = torch.zeros_like(rewards)
 
-        rewards = rewards[:-1]  # Final reward is for a state that will not be calculate
+        rewards = rewards[:-1]  
         deltas = rewards + self.gamma * next_values - values
 
         gae = 0
@@ -278,6 +309,7 @@ class PPOAgent(Agent):
             is_finished = False
             is_truncated = False
             state, _ = self.env.reset()
+            state = torch.tensor(state)
             action, _ = self.policy_network.get_action(
                 torch.tensor(state, dtype=torch.float32)
             )
@@ -324,12 +356,13 @@ class PPOAgent(Agent):
                     for this_state, this_action in zip(states, actions)
                 ]
             )
-        )  # pi (a_t| s_t) / pi (a_t, s_t) #TODO this isn't working
+        )  # pi (a_t| s_t) / pi (a_t, s_t)
         clipped_g = torch.clamp(
             network_probability_ratio, 1 - self.epsilon, 1 + self.epsilon
         )  # g(\epsilon, advantage estimates)
         ratio_with_advantage = advantage_estimates * network_probability_ratio
         clipped_with_advantage = advantage_estimates * clipped_g
+        # ppo_clipped = torch.min(ratio_with_advantage, clipped_with_advantage) # TODO original advantage function
         ppo_clipped = torch.min(ratio_with_advantage, clipped_with_advantage)
         policy_loss = -(
             normalisation_factor
@@ -339,9 +372,9 @@ class PPOAgent(Agent):
         )  # We are minusing here because we are trying to find the arg max, so the LOSS needs to be negative. (since we are trying to minimise the loss)
 
         # Entropy bonus
-        dist = self.policy_network.get_distribution(states)
-        entropy = dist.entropy().mean()
-        policy_loss = policy_loss - self.entropy_coef * entropy
+        # dist = self.policy_network.get_distribution(states)
+        # entropy = dist.entropy().mean()
+        # policy_loss = policy_loss - self.entropy_coef * entropy
         torch.nn.utils.clip_grad_norm_(self.policy_network.parameters(), max_norm=1.0)
         self.policy_optimiser.zero_grad()
         policy_loss.backward()
@@ -366,18 +399,13 @@ class PPOAgent(Agent):
         trajectories, total_timesteps = self.get_trajectories()
 
         ## Get lists of values from our trajectories,
-        states = torch.tensor(
-            np.array([this_timestep[0] for this_timestep in trajectories]),
-            dtype=torch.float32,
+        states = torch.stack(
+            [this_timestep[0].detach().float() for this_timestep in trajectories], dim=0
         )
-        actions = torch.tensor(
-            np.array([this_timestep[1] for this_timestep in trajectories]),
-            dtype=torch.float32,
+        actions = torch.stack(
+            [this_timestep[1].detach().float() for this_timestep in trajectories], dim=0
         )
-        rewards = torch.tensor(
-            np.array([this_timestep[2] for this_timestep in trajectories]),
-            dtype=torch.float32,
-        )
+        rewards = torch.tensor([this_timestep[2] for this_timestep in trajectories])
 
         # Line 4 in pseudocode
         # Compute rewards to go TODO is this the right way to work these out using MC?
@@ -448,7 +476,7 @@ class PPOAgent(Agent):
         episodes = 0
         torch.autograd.set_detect_anomaly(True)
         while timesteps < num_iterations:
-            self.policy_network.update_std(timesteps, num_iterations)
+            # self.policy_network.update_std(timesteps, num_iterations)
             elapsed_timesteps, reward = (
                 self.simulate_episode()
             )  # Simulate an episode and collect rewards
