@@ -20,6 +20,103 @@ import random
 GLOBAL_TIMESTEPS = []
 GLOBAL_REWARDS = []
 
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.distributions import Normal
+
+
+class TanhPPOPolicy(nn.Module):
+    """
+    A PPO policy that outputs actions in (-1, 1) via a Tanh-squashed Normal distribution.
+
+    - MLP for mean (mu).
+    - Learnable log_std parameter (one per action dimension).
+    - Corrects the log_prob for the Tanh transform (so PPO ratio updates are correct).
+    """
+
+    def __init__(self, obs_dim, act_dim, hidden_size=256):
+        super().__init__()
+        # Actor network to produce mean
+        self.net = nn.Sequential(
+            nn.Linear(obs_dim, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, act_dim),
+        )
+        # One learnable log-std per action dimension
+        self.log_std = nn.Parameter(torch.zeros(act_dim))
+
+    def forward(self, states):
+        """
+        Returns:
+          mean: (batch_size, act_dim)
+          log_std: (act_dim) or broadcast to (batch_size, act_dim)
+        """
+        mean = self.net(states)
+        # Expand log_std to match batch size
+        log_std = self.log_std.expand_as(mean)
+        return mean, log_std
+
+    def get_distribution(self, states):
+        """
+        Returns a "base" Normal distribution (pre-tanh) for the given states.
+        We apply tanh later in get_action / get_log_prob.
+        """
+        mean, log_std = self(states)
+        std = torch.exp(log_std)
+        return Normal(mean, std)
+
+    def get_action(self, states):
+        """
+        Samples an action by:
+          1) sampling z ~ N(mean, std),
+          2) action = tanh(z),
+          3) computing log_prob with the correct transform correction.
+
+        Returns:
+          action:   (batch_size, act_dim), in [-1, 1]
+          log_prob: (batch_size, 1)
+        """
+        dist = self.get_distribution(states)
+        # Reparameterized sample: shape (batch_size, act_dim)
+        z = dist.rsample()
+
+        # Tanh-squash
+        action = torch.tanh(z)
+
+        # Compute log_prob(z) in unconstrained space, then subtract the logdet of the Jacobian of tanh
+        log_prob = dist.log_prob(z).sum(dim=-1, keepdim=True)
+
+        # Tanh correction: log(1 - action^2)
+        # sum across actions
+        log_prob -= torch.log(1 - action.pow(2) + 1e-6).sum(dim=-1, keepdim=True)
+
+        return action, log_prob
+
+    def get_log_prob(self, states, actions):
+        """
+        Given states and *tanh-squashed* actions in [-1, 1], compute the log-prob
+        under the current policy, including the Tanh transform correction.
+
+        We invert 'actions' via atanh (0.5 * log((1+a)/(1-a))) to get z in the
+        unconstrained space, then compute log_prob(z) - log(1 - a^2).
+
+        Returns:
+          log_prob: (batch_size, 1)
+        """
+        # Invert the tanh action to get the pre-tanh value z
+        # atanh(x) = 0.5 * [log(1+x) - log(1-x)]
+        pre_tanh = 0.5 * (torch.log1p(actions) - torch.log1p(-actions))
+
+        dist = self.get_distribution(states)
+        log_prob = dist.log_prob(pre_tanh).sum(dim=-1, keepdim=True)
+
+        # Tanh correction: subtract log(1 - a^2)
+        log_prob -= torch.log(1 - actions.pow(2) + 1e-6).sum(dim=-1, keepdim=True)
+        return log_prob
+
 
 class PPOPolicyNetwork(nn.Module):
     """This is sometimes also called the ACTOR network.
@@ -183,8 +280,12 @@ class PPOAgent(Agent):
         super(PPOAgent, self).__init__(env)
 
         # Line 1 of pseudocode
-        self.policy_network = PPOPolicyNetwork(observation_space, action_space, std)
-        self.old_policy_network = PPOPolicyNetwork(observation_space, action_space, std)
+        self.policy_network = TanhPPOPolicy(
+            observation_space, action_space, hidden_size=256
+        )
+        self.old_policy_network = TanhPPOPolicy(
+            observation_space, action_space, hidden_size=256
+        )
         self.transfer_policy_net_to_old()
         self.policy_optimiser = optim.Adam(
             self.policy_network.parameters(),
@@ -225,18 +326,9 @@ class PPOAgent(Agent):
         Returns:
             torch.Tensor: probability ratio of action, given state.
         """
-        current_log_prob = self.policy_network.get_probability_given_action(
-            state, action
-        )
-
-        old_log_prob = self.old_policy_network.get_probability_given_action(
-            state, action
-        )
-
-        current_log_prob = torch.clamp(current_log_prob, min=-20, max=20)
-        old_log_prob = torch.clamp(old_log_prob, min=-20, max=20)
-        log_ratio = current_log_prob - old_log_prob
-        ratio = torch.exp(log_ratio)
+        current_log_prob = self.policy_network.get_log_prob(state, action)
+        old_log_prob = self.old_policy_network.get_log_prob(state, action)
+        ratio = torch.exp(current_log_prob - old_log_prob)
 
         ratio = torch.clamp(ratio, min=1e-10, max=1e10)
 
@@ -406,12 +498,22 @@ class PPOAgent(Agent):
         )
         rewards = torch.tensor([this_timestep[2] for this_timestep in trajectories])
 
-        # Line 4 in pseudocode
-        # Compute rewards to go TODO is this the right way to work these out using MC?
-        rewards_to_go = self.state_action_values_mc(rewards)
-        # rewards_to_go = rewards_to_go - rewards_to_go.mean()
+        # Calculate rewards-to-go for each episode separately
+        rewards_to_go = []
+        episode_rewards = []
+        for reward, is_finished, is_truncated in zip(
+            rewards,
+            [this_timestep[4] for this_timestep in trajectories],
+            [this_timestep[5] for this_timestep in trajectories],
+        ):
+            episode_rewards.append(reward)
+            if is_finished or is_truncated:
+                rewards_to_go.extend(self.state_action_values_mc(episode_rewards))
+                episode_rewards = []
 
-        # rewards_to_go = rewards_to_go / (rewards_to_go.std() + 1e-8)
+        rewards_to_go = torch.tensor(rewards_to_go)
+        rewards_to_go = rewards_to_go - rewards_to_go.mean()
+        rewards_to_go = rewards_to_go / (rewards_to_go.std() + 1e-8)
 
         # Line 5 in Pseudocode
         # Compute advantage estimates
