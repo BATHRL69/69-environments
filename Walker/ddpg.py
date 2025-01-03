@@ -32,7 +32,7 @@ def make_video_ddpg(env_name,agent,save_path):
 
         # action = agent.predict(torch.Tensor(state))
         # state, reward, done, truncated, info = env.step(action)
-        action = agent.actor.get_action(torch.Tensor([state]),test=False)
+        action = agent.actor.predict(torch.Tensor([state]),test=False)
         state, reward, done, truncated ,info = video_env.step(action[0].detach().numpy())
 
     # Save frames as a video
@@ -167,8 +167,8 @@ class DDPGAgent(Agent):
         rewards = torch.Tensor(rewards).unsqueeze(1)
         terminals = torch.Tensor(terminals).unsqueeze(1)
 
-        pred = self.critic.get_q_value(current_states, actions)
-        loss += (pred - (rewards+ self.gamma*(1 - terminals)*self.target_critic.get_q_value(next_states, self.target_actor.get_action(next_states))))**2
+        pred = self.critic.predict(current_states, actions)
+        loss += (pred - (rewards+ self.gamma*(1 - terminals)*self.target_critic.predict(next_states, self.target_actor.predict(next_states))))**2
             
         loss = torch.mean(loss)
 
@@ -176,14 +176,9 @@ class DDPGAgent(Agent):
 
     def actor_loss(self, data):
         loss = 0
-        i += 1
-
         current_states, next_states, actions, rewards, terminals = data
         loss += -(self.critic.predict(current_states, self.actor.predict(current_states)))
-
-
         loss = torch.mean(loss)
-
         return loss 
 
     def train(self, start_steps=100):
@@ -348,7 +343,7 @@ class ActorNetwork(nn.Module):
 class CriticNetwork(nn.Module):
         
     def __init__(self, hidden_size, activation, action_dim, state_dim):
-        super().__init__asd()
+        super().__init__()
         input_size = action_dim + state_dim
         output_size = 1 # critic network just outputs a value
         layers = []
@@ -390,7 +385,7 @@ def render_agent(env, agent, num_episodes=5):
         print(f"Episode {episode + 1}/{num_episodes}")
         while not done:
             env.render()  # Render the environment
-            action = agent.actor.get_action(state, test=True).detach().numpy()
+            action = agent.actor.predict(state, test=True).detach().numpy()
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
             total_reward += reward

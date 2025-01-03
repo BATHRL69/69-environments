@@ -34,7 +34,7 @@ def make_video_td3(env_name,agent,save_path):
 
         # action = agent.predict(torch.Tensor(state))
         # state, reward, done, truncated, info = env.step(action)
-        action = agent.actor.get_action(torch.Tensor([state]),test=False)
+        action = agent.actor.predict(torch.Tensor([state]),test=False)
         state, reward, done, truncated ,info = video_env.step(action[0].detach().numpy())
 
     # Save frames as a video
@@ -237,7 +237,7 @@ class TD3Agent(Agent):
         loss = 0
         #this is batched now
         current_state, next_state, action, reward, terminal = data
-        loss += -(self.get_min_q_value(current_state, self.actor.get_action(current_state)))
+        loss += -(self.get_min_q_value(current_state, self.actor.predict(current_state)))
         loss = torch.mean(loss)
         return loss 
 
@@ -458,7 +458,7 @@ def render_agent(env, agent, num_episodes=5):
         print(f"Episode {episode + 1}/{num_episodes}")
         while not done:
             env.render()  # Render the environment
-            action = agent.actor.get_action(state, test=True).detach().numpy()
+            action = agent.actor.predict(state, test=True).detach().numpy()
             next_state, reward, terminated, truncated, _ = env.step(action)
             done = terminated or truncated
             total_reward += reward
