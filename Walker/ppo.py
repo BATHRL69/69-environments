@@ -291,7 +291,7 @@ class PPOAgent(Agent):
         values = values[:-1]
         advantages = torch.zeros_like(rewards)
 
-        rewards = rewards[:-1]  
+        rewards = rewards[:-1]
         deltas = rewards + self.gamma * next_values - values
 
         gae = 0
@@ -346,9 +346,7 @@ class PPOAgent(Agent):
         self, rewards_to_go, advantage_estimates, states, actions, total_timesteps
     ):
         # Line 6 in Pseudocode
-        normalisation_factor = 1 / (
-            total_timesteps
-        )  # 1 / D_k T, which is just timesteps in trajectory for us because we have 1 trajectory
+        normalisation_factor = 1  # 1 / D_k T, which is just timesteps in trajectory for us because we have 1 trajectory
         network_probability_ratio = (
             torch.stack(  # Stack all the values in our list together,into one big list
                 [
@@ -375,7 +373,7 @@ class PPOAgent(Agent):
         # dist = self.policy_network.get_distribution(states)
         # entropy = dist.entropy().mean()
         # policy_loss = policy_loss - self.entropy_coef * entropy
-        torch.nn.utils.clip_grad_norm_(self.policy_network.parameters(), max_norm=1.0)
+        # torch.nn.utils.clip_grad_norm_(self.policy_network.parameters(), max_norm=1.0)
         self.policy_optimiser.zero_grad()
         policy_loss.backward()
 
@@ -512,7 +510,7 @@ class PPOAgent(Agent):
         Returns:
             torch.Tensor: The best action to take in state S
         """
-        self.policy_network.log_std = torch.tensor(np.log(0.2))
+        # self.policy_network.log_std = torch.tensor(np.log(0.2))
         with torch.no_grad():
             action, _ = self.policy_network.get_action(state)
         return action.detach().numpy()
@@ -645,7 +643,6 @@ class DPOAgent(PPOAgent):
 
         self.policy_optimiser.zero_grad()
         policy_loss.backward()
-        # torch.nn.utils.clip_grad_norm_(self.policy_network.parameters(), max_norm=1.0)
         self.policy_optimiser.step()
 
         # Line 7 in pseudocode
