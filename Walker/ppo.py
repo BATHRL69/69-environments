@@ -135,7 +135,6 @@ class PPOPolicyNetwork(nn.Module):
         log_std = self.log_std(hidden_values)
         # they clamp this between -20 and 2 in the paper i believe
         log_std = torch.clamp(log_std, min=-20, max=2)
-
         return mean, log_std
 
 
@@ -176,9 +175,9 @@ class PPOAgent(Agent):
         learning_rate=3e-4,
         weight_decay=1e-5,
         lambda_gae=0.95,
-        minibatch_size=64,
+        minibatch_size=1024,
         num_trajectories=30,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
-        num_epochs=3,
+        num_epochs=1,
         entropy_coef=0.1,
     ):
         super(PPOAgent, self).__init__(env)
@@ -195,7 +194,7 @@ class PPOAgent(Agent):
         self.value_network = PPOValueNetwork(observation_space)
         self.value_optimiser = optim.Adam(
             self.value_network.parameters(),
-            lr=learning_rate,
+            lr=learning_rate * 10,
             weight_decay=weight_decay,
         )
         self.epsilon = (
@@ -346,7 +345,9 @@ class PPOAgent(Agent):
         self, rewards_to_go, advantage_estimates, states, actions, total_timesteps
     ):
         # Line 6 in Pseudocode
-        normalisation_factor = 1  # 1 / D_k T, which is just timesteps in trajectory for us because we have 1 trajectory
+        normalisation_factor = (
+            1 / total_timesteps
+        )  # 1 / D_k T, which is just timesteps in trajectory for us because we have 1 trajectory
         network_probability_ratio = (
             torch.stack(  # Stack all the values in our list together,into one big list
                 [
@@ -378,20 +379,17 @@ class PPOAgent(Agent):
         policy_loss.backward()
         self.policy_optimiser.step()
         # Line 7 in pseudocode
-        value_estimates = torch.tensor(
-            [self.value_network.forward(this_state) for this_state in states],
-            requires_grad=True,
-        )
+        value_estimates = self.value_network(states).squeeze()
 
         # you can do this. its equivalent. also you can put a .squeeze directly in the forward, should help
         # value_estimates = self.value_network.forward(states).squeeze()
-        value_loss = normalisation_factor * torch.mean(
-            torch.square(value_estimates - rewards_to_go)
-        )
+        value_loss = torch.mean(torch.square(value_estimates - rewards_to_go))
         value_loss.backward()
         self.value_optimiser.step()
 
-        print(f" Actor loss: {policy_loss.detach().numpy().item()} Critic loss: {value_loss.detach().numpy().item()}")
+        print(
+            f" Actor loss: {policy_loss.detach().numpy().item()} Critic loss: {value_loss.detach().numpy().item()}"
+        )
 
     def simulate_episode(self):
         """Simulate a single episode, called by train method on parent class"""
@@ -411,11 +409,15 @@ class PPOAgent(Agent):
         # Line 4 in pseudocode
         # Compute rewards to go TODO is this the right way to work these out using MC?
         rewards_to_go = self.state_action_values_mc(rewards)
+        # rewards_to_go = rewards_to_go - rewards_to_go.mean()
+
+        # rewards_to_go = rewards_to_go / (rewards_to_go.std() + 1e-8)
+
         # Line 5 in Pseudocode
         # Compute advantage estimates
-        advantage_estimates = self.advantage_estimates_mc(
-            states, rewards
-        )  # TODO ONLY NEED ONE OF THESE
+        advantage_estimates = self.advantage_estimates_mc(states, rewards)
+        advantage_estimates = advantage_estimates - advantage_estimates.mean()
+        advantage_estimates = advantage_estimates / (advantage_estimates.std() + 1e-8)
         # advantage_estimates = self.advantage_estimates_gae(states, rewards)
         for _ in range(self.num_epochs):
             for current_batch_start in range(0, total_timesteps, self.minibatch_size):
@@ -423,12 +425,13 @@ class PPOAgent(Agent):
                 batch_locations = np.arange(total_timesteps)
                 np.random.shuffle(batch_locations)
                 current_batch = batch_locations[current_batch_start:current_batch_end]
+                timesteps_in_batch = len(current_batch)
                 self.update_params(
                     rewards_to_go[current_batch],
                     advantage_estimates[current_batch],
                     states[current_batch],
-                    actions,
-                    total_timesteps,
+                    actions[current_batch],
+                    timesteps_in_batch,
                 )
         return total_timesteps, torch.sum(rewards)
 
@@ -649,13 +652,8 @@ class DPOAgent(PPOAgent):
         self.policy_optimiser.step()
 
         # Line 7 in pseudocode
-        value_estimates = torch.tensor(
-            [self.value_network.forward(this_state) for this_state in states],
-            requires_grad=True,
-        )
-        value_loss = normalisation_factor * torch.mean(
-            torch.square(value_estimates - rewards_to_go)
-        )
+        value_estimates = self.value_network(states).squeeze()
+        value_loss = torch.mean(torch.square(value_estimates - rewards_to_go))
         value_loss.backward()
         self.value_optimiser.step()
 
