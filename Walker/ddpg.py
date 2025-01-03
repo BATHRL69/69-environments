@@ -369,35 +369,9 @@ class CriticNetwork(nn.Module):
         x = torch.concatenate([state, action],dim=1)
 
         return self.forward(x)
-    
-def render_agent(env, agent, num_episodes=5):
-    """
-    Visualize the trained agent in the environment.
-    Args:
-        env: The gym environment.
-        agent: The trained DDPG agent.
-        num_episodes: Number of episodes to render.
-    """
-    for episode in range(num_episodes):
-        state, _ = env.reset()
-        total_reward = 0
-        done = False
-        print(f"Episode {episode + 1}/{num_episodes}")
-        while not done:
-            env.render()  # Render the environment
-            action = agent.actor.predict(state, test=True).detach().numpy()
-            next_state, reward, terminated, truncated, _ = env.step(action)
-            done = terminated or truncated
-            total_reward += reward
-            state = next_state
-        print(f"Total reward for episode {episode + 1}: {total_reward}")
-    env.close()
+
 
 if __name__ == "__main__":
-
     env = gym.make("Ant-v4", render_mode=None)
-
     agent = DDPGAgent(env)
     agent.train(10000)
-    env = gym.make("Ant-v4", render_mode="rgb_array")
-    render_agent(env, agent, num_episodes=10)
