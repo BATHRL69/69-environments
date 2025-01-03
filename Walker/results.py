@@ -229,8 +229,8 @@ new_our_rewards_tuned = np.load("sac_test_ours_tuned_rewards.npy")
 new_our_timesteps_not_tuned = np.load("sac_test_ours_nottuned_timesteps.npy")
 new_our_rewards_not_tuned = np.load("sac_test_ours_nottuned_rewards.npy")
 
-sac_tuned_scaledr_timesteps = np.load("sac_test_ours_tuned_scaledr_timesteps.npy")
-sac_tuned_scaledr_rewards = np.load("sac_test_ours_tuned_scaledr_rewards.npy")
+new_timesteps_not_tuned = np.load("sac_og_v1_timesteps.npy")
+new_rewards_not_tuned = np.load("sac_og_v1_rewards.npy")
 
 
 def moving_average(data, window_size=11):
@@ -261,10 +261,10 @@ new_our_rewards_tuned =  moving_average(new_our_rewards_tuned)
 new_our_timesteps_tuned = new_our_timesteps_tuned[:len(new_our_rewards_tuned)]
 
 new_our_rewards_not_tuned =  moving_average(new_our_rewards_not_tuned)
-new_our_timesteps_not_tuned = new_our_timesteps_tuned[:len(new_our_rewards_not_tuned)]
+new_our_timesteps_not_tuned = new_our_timesteps_not_tuned[:len(new_our_rewards_not_tuned)]
 
-sac_tuned_scaledr_rewards =  moving_average(sac_tuned_scaledr_rewards)
-sac_tuned_scaledr_timesteps = sac_tuned_scaledr_timesteps[:len(sac_tuned_scaledr_rewards)]
+new_rewards_not_tuned =  moving_average(new_rewards_not_tuned)
+new_timesteps_not_tuned = new_timesteps_not_tuned[:len(new_rewards_not_tuned)]
 
 plt.figure(figsize=(10, 6))
 plt.plot(sac_tuned_timesteps, sac_tuned_rewards, label="tuned", color="red")
@@ -277,7 +277,10 @@ plt.plot(sac_timesteps_3, sac_rewards_3, label="not", color="green")
 
 plt.plot(new_our_timesteps_tuned, new_our_rewards_tuned, label="ours tuned", color="yellow")
 plt.plot(new_our_timesteps_not_tuned, new_our_rewards_not_tuned, label="ours not", color="purple")
-plt.plot(sac_tuned_scaledr_timesteps, sac_tuned_scaledr_rewards, label="tuned bad scaled", color="black")
+
+plt.plot(new_timesteps_not_tuned, new_rewards_not_tuned, label="NEW", color="black")
+
+
 
 
 plt.xlabel("Timesteps")

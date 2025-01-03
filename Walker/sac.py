@@ -14,32 +14,6 @@ from torch.distributions.normal import Normal
 from agent import Agent
 from typing import NamedTuple, Any
 
-
-def make_video_sample(env_name,agent,save_path):
-    video_env = gym.make(env_name,render_mode="rgb_array")
-    frames = []
-    state, _ = video_env.reset()
-    done = False
-    truncated = False
-
-    while not (done or truncated):
-        frame = video_env.render()
-        frames.append(frame)
-
-        action = agent.actor.sample_ours(torch.Tensor([state]))
-        state, reward, done, truncated ,info = video_env.step(action[0].detach().numpy()[0])
-
-    # Save frames as a video
-    height, width, _ = frames[0].shape
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    video = cv2.VideoWriter(save_path, fourcc, 30, (width, height))
-
-    for frame in frames:
-        video.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-
-    video.release()
-    video_env.close()
-
 class Experience(NamedTuple):
     old_state: Any
     new_state: Any
@@ -58,7 +32,6 @@ class ReplayBuffer():
         self.reward_buffer = np.zeros(max_capacity)
         self.is_terminal_buffer = np.zeros(max_capacity)     
     
-
     def add(self, experience: Experience):
         idx = self.counter % self.max_capacity
         self.counter += 1
@@ -69,7 +42,6 @@ class ReplayBuffer():
         self.reward_buffer[idx] = experience.reward
         self.is_terminal_buffer[idx] = experience.is_terminal
     
-
     def get(self, batch_size: int):
         valid_entries = min(self.counter, self.max_capacity)
         indices = np.random.choice(list(range(valid_entries)), batch_size)
@@ -101,8 +73,6 @@ class SACPolicyNetwork(nn.Module):
         )
 
         self.mean = nn.Linear(self._hidden_units, self._action_dim)
-        # attempting to simplify this to std for now
-        # note: attempt didnt work because: log negative numbers = bad
         self.log_std = nn.Linear(self._hidden_units, self._action_dim)
 
 
@@ -110,7 +80,7 @@ class SACPolicyNetwork(nn.Module):
         hidden_values = self.ann(state)
         mean = self.mean(hidden_values)
         log_std = self.log_std(hidden_values)
-        # they clamp this between -20 and 2 in the paper i believe
+        # standard clamping
         log_std = torch.clamp(log_std, min=-20, max=2)
 
         return mean, log_std
@@ -135,8 +105,7 @@ class SACPolicyNetwork(nn.Module):
         log_2pi = torch.log(torch.Tensor([2 * torch.pi]))
         log_probs = -0.5 * (((probabilities - mean) / std).pow(2) + 2 * log_std + log_2pi)
 
-        # one reason for epsilon is to avoid log 0, apparently theres other reasons
-        # also idk what this term actually is but they use it in the paper
+        # epsilon is to avoid log 0, nans bad
         epsilon = 1e-6
         log_probs -= torch.log(self.action_max * (1 - sampled_action.pow(2)) + epsilon)
         log_probs = log_probs.sum(dim=1, keepdim=True)
@@ -169,41 +138,6 @@ class SACValueNetwork(nn.Module):
         action_value_estimate_1 = self.ann1(network_input) # estimate the value of an action in a state
 
         return torch.squeeze(action_value_estimate_1)
-
-class SACDoubleValueNetwork(nn.Module):
-    def __init__(self, input_dim:int=256, hidden_dim:int=256):
-        super(SACValueNetwork, self).__init__()
-
-        self._input_dim = input_dim
-        self._hidden_dim = hidden_dim
-
-        # they used 2 hidden layers and 256 hidden units in paper
-        self.ann1 = nn.Sequential(
-            nn.Linear(self._input_dim, self._hidden_dim),
-            nn.ReLU(),
-            nn.Linear(self._hidden_dim, self._hidden_dim),
-            nn.ReLU(),
-            nn.Linear(self._hidden_dim, 1),
-        )
-
-        self.ann2 = nn.Sequential(
-            nn.Linear(self._input_dim, self._hidden_dim),
-            nn.ReLU(),
-            nn.Linear(self._hidden_dim, self._hidden_dim),
-            nn.ReLU(),
-            nn.Linear(self._hidden_dim, 1),
-        )
-
-
-    def forward(self, state:torch.Tensor, action:torch.Tensor)->torch.Tensor:
-        # Assuming batch is dim=0, so state is shape [batch,state_space]
-        # action is [batch,action_space]
-
-        network_input = torch.cat([state, action], dim=1)
-        action_value_estimate_1 = self.ann1(network_input) # estimate the value of an action in a state
-        action_value_estimate_2 = self.ann2(network_input) # estimate the value of an action in a state
-
-        return torch.squeeze(action_value_estimate_1),torch.squeeze(action_value_estimate_2)
 
 ## WORKING AGENT
 class SACAgent(Agent):
@@ -250,7 +184,8 @@ class SACAgent(Agent):
             self.alpha = self.log_alpha.exp().item()
         else:
             self.alpha = fixed_alpha
-        # line 2 of pseudocode
+
+        #copying critic params into targets
         self.polyak_update(0)
 
     def polyak_update(self, polyak):
@@ -306,7 +241,7 @@ class SACAgent(Agent):
             if is_finished or is_truncated:
                 break
 
-        print(f"Actor loss: {a_loss} Critic loss: {c_loss}")
+        print(f"Actor loss: {a_loss} Critic loss: {c_loss} Alpha:{self.alpha}")
         return timestep, reward_total
 
     def update_params(self):
@@ -321,7 +256,6 @@ class SACAgent(Agent):
 
         critic_1_evaluation = self.critic_1(old_states,actions)
         critic_2_evaluation = self.critic_2(old_states,actions)
-
 
         actor_prediction_new, log_actor_probability_new = self.actor.sample(new_states)
 
@@ -339,8 +273,6 @@ class SACAgent(Agent):
         total_critic_loss.backward()
         self.critics_optimiser.step()
 
-        self.actor_optimiser.zero_grad()
-
         actor_prediction_old, log_actor_probability_old = self.actor.sample(old_states)
         critic_1_prediction = self.critic_1(old_states, actor_prediction_old)
         critic_2_prediction = self.critic_2(old_states, actor_prediction_old)
@@ -353,6 +285,7 @@ class SACAgent(Agent):
         else:
             alpha_loss = None
 
+        self.actor_optimiser.zero_grad()
         actor_loss.backward()
         self.actor_optimiser.step()
 
@@ -399,13 +332,10 @@ if __name__ == "__main__":
         # make_video = True if i==0 else False
         env = gym.make("Ant-v4", render_mode="rgb_array")
         agent = SACAgent(env,fixed_alpha=0.2,reward_scale=5.0,lr=3e-4,batch_size=256)
-        agent.train(300_000,10_000)
+        agent.train(1_000_000,10_000)
    
         # np.save("sac_tuned_ant_timesteps_1000000_"+str(i)+".npy", np.array(agent.timestep_list))
         # np.save("sac_tuned_ant_rewards_1000000_"+str(i)+".npy", np.array(agent.reward_list))
         # make_video_sample("Ant-v4",agent,"sac_tuned_ant_1000000_"+str(i)+".mp4")
-        np.save("sac_og_v1_timesteps.npy", np.array(agent.timestep_list))
-        np.save("sac_og_v1_rewards.npy", np.array(agent.reward_list))
-
-#TODOS: export temperature loss to separate function
-#TRY USING A DOUBLE CRITIC IN ONE MODEL
+        np.save("sac_og_nottuned_v2_timesteps.npy", np.array(agent.timestep_list))
+        np.save("sac_og_nottuned_v2_rewards.npy", np.array(agent.reward_list))
