@@ -382,7 +382,7 @@ class PPOAgent(Agent):
             all_actions.append(actions)
             all_rewards_to_go.append(rewards_to_go)
             all_advantage_estimates.append(advantage_estimates)
-        all_rewards = torch.cat(all_rewards, dim = 0)
+        all_rewards = torch.cat(all_rewards, dim=0)
         all_states = torch.cat(all_states, dim=0)
         all_actions = torch.cat(all_actions, dim=0)
         all_rewards_to_go = torch.cat(all_rewards_to_go, dim=0)
@@ -489,15 +489,15 @@ class DPOAgent(PPOAgent):
     def __init__(
         self,
         env,
-        epsilon=0.3,
+        epsilon=0.2,
         gamma=0.99,
         observation_space=115,  # Default from ant-v4
         action_space=8,
-        std=0.1,
+        std=0.4,
         learning_rate=3e-4,
-        weight_decay=0,
+        weight_decay=1e-5,
         lambda_gae=0.95,
-        minibatch_size=512,
+        batch_size=64,
         num_trajectories=10,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
         num_epochs=3,
         entropy_coef=0.01,
@@ -514,7 +514,7 @@ class DPOAgent(PPOAgent):
             learning_rate,
             weight_decay,
             lambda_gae,
-            minibatch_size,
+            batch_size,
             num_trajectories,
             num_epochs,
             entropy_coef,
@@ -579,20 +579,23 @@ class DPOAgent(PPOAgent):
         drift = self.calculate_drift(
             network_probability_ratio, advantage_estimates
         )  # Fig 9 DPO paper, drift is advantage estimate weighted by probability.
-        policy_loss = -normalisation_factor * torch.sum(drift * advantage_estimates)
+        policy_loss = -(network_probability_ratio * advantage_estimates - drift).mean()
 
         # Entropy bonus
         dist = self.policy_network.get_distribution(states)
         entropy = dist.entropy().mean()
         policy_loss = policy_loss - self.entropy_coef * entropy
-
+        torch.nn.utils.clip_grad_norm_(
+            self.policy_network.parameters(), max_norm=1.0
+        )  # Avoid huge grad updates
         self.policy_optimiser.zero_grad()
         policy_loss.backward()
         self.policy_optimiser.step()
 
         # Line 7 in pseudocode
-        self.value_optimiser.zero_grad()
         value_estimates = self.value_network(states).squeeze()
+        self.value_optimiser.zero_grad()
+
         value_loss = torch.mean(torch.square(value_estimates - rewards_to_go))
         value_loss.backward()
         self.value_optimiser.step()
