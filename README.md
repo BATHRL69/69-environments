@@ -2,7 +2,7 @@
 
 ### Recreating results
 
-1. Requirements can be found in requirements.txt
+1. Requirements can be found in `requirements.txt`
 2. In order to generate results for each agent, uncomment the required agent, and run `get_results.py`. Note, we generated results over three runs for each agent, which would take days. In order to reduce time our get_results runs agents once.
 3. These will save results in a format that can be plotted.
 
