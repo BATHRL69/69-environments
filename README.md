@@ -12,6 +12,5 @@ All of the RL agents were implemented "from scratch". However, our environment w
 
 | Library | What we used it for | Modifications Made |
 | ------- | ------------------- | ------------------ |
-
 | [Gymnasium / Gym](https://github.com/Farama-Foundation/Gymnasium) | The interface for training our agents. For instance implementing the rewards function, and state and action spaces used by our agents | None |
 | [Mujoco / Ant-v4](https://github.com/openai/mujoco-py) | Environment ant was implemented in, for instance implementing transition dynamics | None |
