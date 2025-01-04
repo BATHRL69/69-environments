@@ -18,10 +18,6 @@ GLOBAL_REWARDS = []
 
 random.seed(0)
 
-# https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/algos/pytorch/ddpg/core.py
-# https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/algos/pytorch/ddpg/ddpg.py
-
-
 def make_video_ddpg(env_name,agent,save_path):
     video_env = gym.make(env_name,render_mode="rgb_array")
     print(f"Making video at {save_path}")
@@ -36,7 +32,7 @@ def make_video_ddpg(env_name,agent,save_path):
 
         # action = agent.predict(torch.Tensor(state))
         # state, reward, done, truncated, info = env.step(action)
-        action = agent.actor.get_action(torch.Tensor([state]),test=False)
+        action = agent.actor.predict(torch.Tensor([state]),test=False)
         state, reward, done, truncated ,info = video_env.step(action[0].detach().numpy())
 
     # Save frames as a video
@@ -49,32 +45,6 @@ def make_video_ddpg(env_name,agent,save_path):
 
     video.release()
     video_env.close()
-
-# class ReplayBuffer:
-
-#     def __init__(self, max_buffer_size, sample_size):
-#         self.max_buffer_size = max_buffer_size
-#         self.sample_size = sample_size
-#         self.buffer: List[Tuple] = []
-
-#     def add(self, observation):
-#         if len(self.buffer) >= self.max_buffer_size:
-#             # randomly select an index
-#             index = random.randint(0, len(self.buffer) - 1)
-#             self.buffer[index] = observation
-#         else:
-#             self.buffer.append(observation)
-
-#     def sample(self):
-#         sample = []
-#         indices_selected = set()
-#         for i in range(self.sample_size):
-#             index = random.randint(0, len(self.buffer) - 1)
-#             while index in indices_selected:
-#                 index = random.randint(0, len(self.buffer) - 1)
-#             sample.append(self.buffer[index])
-#         return sample
-
 
 class Experience(NamedTuple):
     old_state: Any
@@ -113,7 +83,7 @@ class ReplayBuffer():
 
 class DDPGAgent(Agent):
 
-    hidden_size = (400, 300)
+    hidden_size = (256, 256)
 
     def __init__(
             self,
@@ -157,14 +127,15 @@ class DDPGAgent(Agent):
             act_limit_high,
             act_limit_low
         )
+
         self.actor_optimiser = Adam(self.actor.parameters(), lr = self.actor_lr)
 
         # q-value function
         self.critic = CriticNetwork(
             self.hidden_size,
             ReLU(),
-            state_dim,
-            action_dim
+            action_dim,
+            state_dim
         )
         self.critic_optimiser = Adam(self.critic.parameters(), lr = self.critic_lr)
 
@@ -196,8 +167,8 @@ class DDPGAgent(Agent):
         rewards = torch.Tensor(rewards).unsqueeze(1)
         terminals = torch.Tensor(terminals).unsqueeze(1)
 
-        pred = self.critic.get_q_value(current_states, actions)
-        loss += (pred - (rewards+ self.gamma*(1 - terminals)*self.target_critic.get_q_value(next_states, self.target_actor.get_action(next_states))))**2
+        pred = self.critic.predict(current_states, actions)
+        loss += (pred - (rewards+ self.gamma*(1 - terminals)*self.target_critic.predict(next_states, self.target_actor.predict(next_states))))**2
             
         loss = torch.mean(loss)
 
@@ -206,10 +177,8 @@ class DDPGAgent(Agent):
     def actor_loss(self, data):
         loss = 0
         current_states, next_states, actions, rewards, terminals = data
-        loss += -(self.critic.get_q_value(current_states, self.actor.get_action(current_states)))
-
+        loss += -(self.critic.predict(current_states, self.actor.predict(current_states)))
         loss = torch.mean(loss)
-
         return loss 
 
     def train(self, start_steps=100):
@@ -239,7 +208,7 @@ class DDPGAgent(Agent):
                 make_video_ddpg("Ant-v4",self,save_path_str)
 
             # action -> numpy array
-            a = self.actor.get_action(last_s).detach().numpy()
+            a = self.actor.predict(last_s).detach().numpy()
 
             # NUMPY ARRAY
             assert isinstance(a, np.ndarray), f"Expected a NumPy array, but got {type(a)}"
@@ -251,10 +220,12 @@ class DDPGAgent(Agent):
             self.replay_buffer.add(experience)
             if done:
                 last_s, _ = self.env.reset()
+
                 episodic_rewards.append(total_reward)
                 GLOBAL_REWARDS.append(total_reward)
                 GLOBAL_TIMESTEPS.append(episode)
                 # print(lives, "attempt:\n", "died after ", alive, " steps", "total reward", total_reward, "\n")
+
                 total_reward = 0
                 alive = 0
                 lives += 1
@@ -266,39 +237,13 @@ class DDPGAgent(Agent):
             if episode % self.training_frequency == 0:
                 self.update_weights()
 
-        episodic_rewards = []
+            episodic_rewards.append(total_reward)
 
-        total_reward = 0
-        print("START TESTING")
-        alive = 0
-        lives = 0
-        self.critic_losses = []
-        self.actor_losses = []
+        print(len(episodic_rewards))
 
-        for episode in tqdm(range(1000)):
-
-            # action -> numpy array
-            a = self.actor.get_action(last_s, test=True).detach().numpy()
-
-            # NUMPY ARRAY
-            assert isinstance(a, np.ndarray), f"Expected a NumPy array, but got {type(a)}"
-
-            new_s, reward, terminated, truncated, *args = self.env.step(a)
-            total_reward += reward
-            done = terminated or truncated
-            #self.replay_buffer.add((last_s, a, reward, new_s, done))
-            if done:
-                last_s, _ = self.env.reset()
-                episodic_rewards.append(total_reward)
-                total_reward = 0
-                alive = 0
-                lives += 1
-                
-            else:
-                alive += 1
-                last_s = new_s
 
         
+
         # # Plot the episodic curve
         # plt.plot(range(len(episodic_rewards)), episodic_rewards, label="Episodic rewards")
         # plt.xlabel("Episodes")
@@ -319,6 +264,7 @@ class DDPGAgent(Agent):
         # plt.ylabel("Actor Losses")
         # plt.legend()
         # plt.show()
+
 
     def update_weights(self):
         samples = self.replay_buffer.get(self.replay_sample_size)
@@ -345,15 +291,12 @@ class DDPGAgent(Agent):
         for parameter in self.critic.parameters():
             parameter.requires_grad = True
 
-        # polyak averaging -> actor params
-        for actor_p, target_actor_p in zip(self.actor.parameters(), self.target_actor.parameters()):
-            target_actor_p.data.mul_(self.polyak)
-            target_actor_p.data.add_((1 - self.polyak) * actor_p.data)
+        # polyak target network update
+        for p, target_p in zip(self.actor.parameters(), self.target_actor.parameters()):
+            target_p.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_p.data)
 
-        # polyak averaging -> critic params
-        for critic_p, target_critic_p in zip(self.critic.parameters(), self.target_critic.parameters()):
-            target_critic_p.data.mul_(self.polyak)
-            target_critic_p.data.add_((1 - self.polyak) * critic_p.data)
+        for p, target_p in zip(self.critic.parameters(), self.target_critic.parameters()):
+            target_p.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_p.data)
 
 class ActorNetwork(nn.Module):
 
@@ -385,7 +328,7 @@ class ActorNetwork(nn.Module):
         return scaled_output
     
 
-    def get_action(self, state, test=False):
+    def predict(self, state, test=False):
         noise_rate = 0.1
         a = self.forward(torch.as_tensor(state, dtype=torch.float32))
 
@@ -396,7 +339,6 @@ class ActorNetwork(nn.Module):
         assert isinstance(a, torch.Tensor), f"Expected a PyTorch tensor, but got {type(a)}"
         assert a.dtype == torch.float32, f"Expected tensor of dtype float32, but got {a.dtype}"
         return a
-
 
 class CriticNetwork(nn.Module):
         
@@ -420,42 +362,16 @@ class CriticNetwork(nn.Module):
     def forward(self, x):
         return self.network(x)
     
-    def get_q_value(self, state, action):
+    def predict(self, state, action):
 
         state = torch.as_tensor(state, dtype=torch.float32)
         action = torch.as_tensor(action, dtype=torch.float32)
         x = torch.concatenate([state, action],dim=1)
-        return self.forward(x)
-    
 
-def render_agent(env, agent, num_episodes=5):
-    """
-    Visualize the trained agent in the environment.
-    Args:
-        env: The gym environment.
-        agent: The trained DDPG agent.
-        num_episodes: Number of episodes to render.
-    """
-    for episode in range(num_episodes):
-        state, _ = env.reset()
-        total_reward = 0
-        done = False
-        print(f"Episode {episode + 1}/{num_episodes}")
-        while not done:
-            env.render()  # Render the environment
-            action = agent.actor.get_action(state, test=True).detach().numpy()
-            next_state, reward, terminated, truncated, _ = env.step(action)
-            done = terminated or truncated
-            total_reward += reward
-            state = next_state
-        print(f"Total reward for episode {episode + 1}: {total_reward}")
-    env.close()
+        return self.forward(x)
 
 
 if __name__ == "__main__":
-
     env = gym.make("Ant-v4", render_mode=None)
     agent = DDPGAgent(env)
     agent.train(10000)
-    env = gym.make("Ant-v4", render_mode="rgb_array")
-    render_agent(env, agent, num_episodes=10)

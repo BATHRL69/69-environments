@@ -15,11 +15,9 @@ from agent import Agent
 
 random.seed(0)
 
-# https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/algos/pytorch/ddpg/core.py
-# https://github.com/openai/spinningup/blob/038665d62d569055401d91856abb287263096178/spinup/algos/pytorch/ddpg/ddpg.py
-
 GLOBAL_TIMESTEPS = []
 GLOBAL_REWARDS = []
+
 
 
 def make_video_td3(env_name,agent,save_path):
@@ -36,7 +34,7 @@ def make_video_td3(env_name,agent,save_path):
 
         # action = agent.predict(torch.Tensor(state))
         # state, reward, done, truncated, info = env.step(action)
-        action = agent.actor.get_action(torch.Tensor([state]),test=False)
+        action = agent.actor.predict(torch.Tensor([state]),test=False)
         state, reward, done, truncated ,info = video_env.step(action[0].detach().numpy())
 
     # Save frames as a video
@@ -87,35 +85,11 @@ class ReplayBuffer():
         indices = np.random.choice(list(range(valid_entries)), batch_size)
         return self.old_state_buffer[indices], self.new_state_buffer[indices], self.action_buffer[indices], self.reward_buffer[indices], self.is_terminal_buffer[indices]
 
-# class ReplayBuffer:
 
-#     def __init__(self, max_buffer_size, sample_size):
-#         self.max_buffer_size = max_buffer_size
-#         self.sample_size = sample_size
-#         self.buffer: List[Tuple] = []
-
-#     def add(self, observation):
-#         if len(self.buffer) >= self.max_buffer_size:
-#             # randomly select an index
-#             index = random.randint(0, len(self.buffer) - 1)
-#             self.buffer[index] = observation
-#         else:
-#             self.buffer.append(observation)
-
-#     def sample(self):
-#         sample = []
-#         indices_selected = set()
-#         for i in range(self.sample_size):
-#             index = random.randint(0, len(self.buffer) - 1)
-#             while index in indices_selected:
-#                 index = random.randint(0, len(self.buffer) - 1)
-#             sample.append(self.buffer[index])
-#         return sample
 
 class TD3Agent(Agent):
 
-    # hidden_size = (256, 256)
-    hidden_size = (400, 300)
+    hidden_size = (256, 256)
 
     def __init__(
             self,
@@ -221,13 +195,13 @@ class TD3Agent(Agent):
         rewards = torch.Tensor(rewards).unsqueeze(1)
         terminals = torch.Tensor(terminals).unsqueeze(1)
 
-        pred_q1 = self.critic_1.get_q_value(current_states, actions)
-        pred_q2 = self.critic_2.get_q_value(current_states, actions)
+        pred_q1 = self.critic_1.predict(current_states, actions)
+        pred_q2 = self.critic_2.predict(current_states, actions)
 
         eps = torch.randn(actions.shape) * self.actor_target_noise
         eps = torch.clamp(eps, -self.actor_noise_clip, self.actor_noise_clip)
 
-        noised_target_action = self.target_actor.get_action(next_states) + eps
+        noised_target_action = self.target_actor.predict(next_states) + eps
         noised_target_action = torch.clamp(noised_target_action, self.act_limit_low, self.act_limit_high)
 
         true = (rewards + self.gamma*(1 - terminals)*self.get_min_target_q_value(next_states, noised_target_action))
@@ -242,8 +216,8 @@ class TD3Agent(Agent):
     
 
     def get_min_target_q_value(self, state, action):
-        q_value_1 = self.target_critic_1.get_q_value(state, action)
-        q_value_2 = self.target_critic_2.get_q_value(state, action)
+        q_value_1 = self.target_critic_1.predict(state, action)
+        q_value_2 = self.target_critic_2.predict(state, action)
 
         min_q_value = torch.min(q_value_1, q_value_2) # change if gradient issues?
 
@@ -251,8 +225,8 @@ class TD3Agent(Agent):
     
 
     def get_min_q_value(self, state, action):
-        q_value_1 = self.critic_1.get_q_value(state, action)
-        q_value_2 = self.critic_2.get_q_value(state, action)
+        q_value_1 = self.critic_1.predict(state, action)
+        q_value_2 = self.critic_2.predict(state, action)
 
         min_q_value = torch.min(q_value_1, q_value_2) # change if gradient issues?
 
@@ -263,10 +237,8 @@ class TD3Agent(Agent):
         loss = 0
         #this is batched now
         current_state, next_state, action, reward, terminal = data
-        loss += -(self.get_min_q_value(current_state, self.actor.get_action(current_state)))
-
+        loss += -(self.get_min_q_value(current_state, self.actor.predict(current_state)))
         loss = torch.mean(loss)
-
         return loss 
 
     def train(self, start_steps=100):
@@ -296,7 +268,7 @@ class TD3Agent(Agent):
                 save_path_str = "new_td3_ant_"+str(episode)+".mp4"
                 make_video_td3("Ant-v4",self,save_path_str)
             # action -> numpy array
-            a = self.actor.get_action(last_s).detach().numpy()
+            a = self.actor.predict(last_s).detach().numpy()
 
             # NUMPY ARRAY
             assert isinstance(a, np.ndarray), f"Expected a NumPy array, but got {type(a)}"
@@ -322,38 +294,6 @@ class TD3Agent(Agent):
 
             if episode % self.training_frequency == 0:
                 self.update_weights((episode % self.actor_update_frequency == 0))
-
-        episodic_rewards = []
-
-        total_reward = 0
-        print("START TESTING")
-        alive = 0
-        lives = 0
-        self.critic_losses_1 = []
-        self.actor_losses = []
-
-        for episode in tqdm(range(1000)):
-
-            # action -> numpy array
-            a = self.actor.get_action(last_s, test=True).detach().numpy()
-
-            # NUMPY ARRAY
-            assert isinstance(a, np.ndarray), f"Expected a NumPy array, but got {type(a)}"
-
-            new_s, reward, terminated, truncated, *args = self.env.step(a)
-            total_reward += reward
-            done = terminated or truncated
-            #self.replay_buffer.add((last_s, a, reward, new_s, done))
-            if done:
-                last_s, _ = self.env.reset()
-                episodic_rewards.append(total_reward)
-                total_reward = 0
-                alive = 0
-                lives += 1
-                
-            else:
-                alive += 1
-                last_s = new_s
 
         
         # # Plot the episodic curve
@@ -420,19 +360,15 @@ class TD3Agent(Agent):
             for parameter in self.critic_2.parameters():
                 parameter.requires_grad = True
 
-            # polyak averaging -> actor params
-            for actor_p, target_actor_p in zip(self.actor.parameters(), self.target_actor.parameters()):
-                target_actor_p.data.mul_(self.polyak)
-                target_actor_p.data.add_((1 - self.polyak) * actor_p.data)
+            # polyak target network update
+            for p, target_p in zip(self.actor.parameters(), self.target_actor.parameters()):
+                target_p.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_p.data)
 
-            # polyak averaging -> critic 1 params
-            for critic_p, target_critic_p in zip(self.critic_1.parameters(), self.target_critic_1.parameters()):
-                target_critic_p.data.mul_(self.polyak)
-                target_critic_p.data.add_((1 - self.polyak) * critic_p.data)
+            for p, target_p in zip(self.critic_1.parameters(), self.target_critic_1.parameters()):
+                target_p.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_p.data)
 
-            for critic_p, target_critic_p in zip(self.critic_2.parameters(), self.target_critic_2.parameters()):
-                target_critic_p.data.mul_(self.polyak)
-                target_critic_p.data.add_((1 - self.polyak) * critic_p.data)
+            for p, target_p in zip(self.critic_2.parameters(), self.target_critic_2.parameters()):
+                target_p.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_p.data)
 
 class ActorNetwork(nn.Module):
 
@@ -464,7 +400,7 @@ class ActorNetwork(nn.Module):
         return scaled_output
     
 
-    def get_action(self, state, test=False):
+    def predict(self, state, test=False):
         noise_rate = 0.1
         a = self.forward(torch.as_tensor(state, dtype=torch.float32))
 
@@ -479,7 +415,7 @@ class ActorNetwork(nn.Module):
 
 class CriticNetwork(nn.Module):
         
-    def __init__(self, hidden_size, activation, action_dim, state_dim):
+    def __init__(self, hidden_size, activation, state_dim, action_dim):
         super().__init__()
         input_size = action_dim + state_dim
         output_size = 1 # critic network just outputs a value
@@ -499,42 +435,15 @@ class CriticNetwork(nn.Module):
     def forward(self, x):
         return self.network(x)
     
-    def get_q_value(self, state, action):
+    def predict(self, state, action):
 
         state = torch.as_tensor(state, dtype=torch.float32)
         action = torch.as_tensor(action, dtype=torch.float32)
         x = torch.concatenate([state, action],dim=1)
         return self.forward(x)
-    
-
-def render_agent(env, agent, num_episodes=5):
-    """
-    Visualize the trained agent in the environment.
-    Args:
-        env: The gym environment.
-        agent: The trained DDPG agent.
-        num_episodes: Number of episodes to render.
-    """
-    for episode in range(num_episodes):
-        state, _ = env.reset()
-        total_reward = 0
-        done = False
-        print(f"Episode {episode + 1}/{num_episodes}")
-        while not done:
-            env.render()  # Render the environment
-            action = agent.actor.get_action(state, test=True).detach().numpy()
-            next_state, reward, terminated, truncated, _ = env.step(action)
-            done = terminated or truncated
-            total_reward += reward
-            state = next_state
-        print(f"Total reward for episode {episode + 1}: {total_reward}")
-    env.close()
 
 
 if __name__ == "__main__":
-
     env = gym.make("Ant-v4", render_mode=None)
     agent = TD3Agent(env)
     agent.train()
-    env = gym.make("Ant-v4", render_mode="human")
-    render_agent(env, agent, num_episodes=10)
