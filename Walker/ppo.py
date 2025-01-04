@@ -136,7 +136,7 @@ class PPOAgent(Agent):
         learning_rate=3e-4,
         weight_decay=1e-5,
         lambda_gae=0.95,
-        minibatch_size=64,
+        batch_size=64,
         num_trajectories=10,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
         num_epochs=3,
         entropy_coef=0.01,
@@ -166,7 +166,7 @@ class PPOAgent(Agent):
             100000  # Maximum number of timesteps in a trajectory
         )
         self.lambda_gae = lambda_gae
-        self.minibatch_size = minibatch_size
+        self.minibatch_size = batch_size
         self.num_trajectories = num_trajectories
         self.num_epochs = num_epochs
         self.entropy_coef = entropy_coef
