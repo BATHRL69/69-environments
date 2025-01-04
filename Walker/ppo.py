@@ -1,9 +1,3 @@
-## TODO
-# Hyper param tuning
-# Speed up running
-# Update size of neural network to get best results
-# Try different distributions other than normal | I think normal is best for our environment | Stable baslines uses DiagGaussianDistribution or StateDependentNoiseDistribution, so these could be ones to try, rllib uses normal.
-
 import gymnasium as gym
 import numpy as np
 from agent import Agent
@@ -15,107 +9,9 @@ from torch.distributions import Normal
 from ppo_constants import *
 import torch.optim as optim
 import matplotlib.pyplot as plt
-import random
 
 GLOBAL_TIMESTEPS = []
 GLOBAL_REWARDS = []
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.distributions import Normal
-
-
-class TanhPPOPolicy(nn.Module):
-    """
-    A PPO policy that outputs actions in (-1, 1) via a Tanh-squashed Normal distribution.
-
-    - MLP for mean (mu).
-    - Learnable log_std parameter (one per action dimension).
-    - Corrects the log_prob for the Tanh transform (so PPO ratio updates are correct).
-    """
-
-    def __init__(self, obs_dim, act_dim, hidden_size=256):
-        super().__init__()
-        # Actor network to produce mean
-        self.net = nn.Sequential(
-            nn.Linear(obs_dim, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, act_dim),
-        )
-        # One learnable log-std per action dimension
-        self.log_std = nn.Parameter(torch.zeros(act_dim))
-
-    def forward(self, states):
-        """
-        Returns:
-          mean: (batch_size, act_dim)
-          log_std: (act_dim) or broadcast to (batch_size, act_dim)
-        """
-        mean = self.net(states)
-        # Expand log_std to match batch size
-        log_std = self.log_std.expand_as(mean)
-        return mean, log_std
-
-    def get_distribution(self, states):
-        """
-        Returns a "base" Normal distribution (pre-tanh) for the given states.
-        We apply tanh later in get_action / get_log_prob.
-        """
-        mean, log_std = self(states)
-        std = torch.exp(log_std)
-        return Normal(mean, std)
-
-    def get_action(self, states):
-        """
-        Samples an action by:
-          1) sampling z ~ N(mean, std),
-          2) action = tanh(z),
-          3) computing log_prob with the correct transform correction.
-
-        Returns:
-          action:   (batch_size, act_dim), in [-1, 1]
-          log_prob: (batch_size, 1)
-        """
-        dist = self.get_distribution(states)
-        # Reparameterized sample: shape (batch_size, act_dim)
-        z = dist.rsample()
-
-        # Tanh-squash
-        action = torch.tanh(z)
-
-        # Compute log_prob(z) in unconstrained space, then subtract the logdet of the Jacobian of tanh
-        log_prob = dist.log_prob(z).sum(dim=-1, keepdim=True)
-
-        # Tanh correction: log(1 - action^2)
-        # sum across actions
-        log_prob -= torch.log(1 - action.pow(2) + 1e-6).sum(dim=-1, keepdim=True)
-
-        return action, log_prob
-
-    def get_log_prob(self, states, actions):
-        """
-        Given states and *tanh-squashed* actions in [-1, 1], compute the log-prob
-        under the current policy, including the Tanh transform correction.
-
-        We invert 'actions' via atanh (0.5 * log((1+a)/(1-a))) to get z in the
-        unconstrained space, then compute log_prob(z) - log(1 - a^2).
-
-        Returns:
-          log_prob: (batch_size, 1)
-        """
-        # Invert the tanh action to get the pre-tanh value z
-        # atanh(x) = 0.5 * [log(1+x) - log(1-x)]
-        pre_tanh = 0.5 * (torch.log1p(actions) - torch.log1p(-actions))
-
-        dist = self.get_distribution(states)
-        log_prob = dist.log_prob(pre_tanh).sum(dim=-1, keepdim=True)
-
-        # Tanh correction: subtract log(1 - a^2)
-        log_prob -= torch.log(1 - actions.pow(2) + 1e-6).sum(dim=-1, keepdim=True)
-        return log_prob
 
 
 class PPOPolicyNetwork(nn.Module):
@@ -139,25 +35,24 @@ class PPOPolicyNetwork(nn.Module):
             nn.ReLU(),
             nn.Linear(256, 256),
             nn.ReLU(),
+            nn.Linear(256, action_space),
         )
-        self.mean = nn.Linear(256, action_space)
-        self.log_std = nn.Linear(256, action_space)
-        self.action_max = 1
+        self.max_std = std
+        self.log_std = torch.tensor(np.log(std))
 
-    # def update_std(self, timesteps_through, total_timesteps):
-    #     """Update STD over training, to encourage exploration at the start, and then hone in on correct actions neared the end
+    def update_std(self, timesteps_through, total_timesteps):
+        """Update STD over training, to encourage exploration at the start, and then hone in on correct actions neared the end
 
-    #     Args:
-    #         timesteps_through (int): Amount of timesteps through at curent point in training
-    #         total_timesteps (int): Total timesteps for training
-    #     """
-    #     min_std = 0.05
-    #     new_std = (
-    #         self.max_std
-    #         - (self.max_std - min_std) * (timesteps_through / total_timesteps)
-    #     ) + 0.0001  # Ensure it never gets to 0, this will give us nans
-    #     new_std = 0.20
-    #     self.log_std = torch.tensor(np.log(new_std))
+        Args:
+            timesteps_through (int): Amount of timesteps through at curent point in training
+            total_timesteps (int): Total timesteps for training
+        """
+        min_std = 0.05
+        new_std = (
+            self.max_std
+            - (self.max_std - min_std) * (timesteps_through / total_timesteps)
+        ) + 0.01  # Ensure it never gets to 0, timesteps through can go slightly above timesteps, this will give us nans
+        self.log_std = torch.tensor(np.log(new_std))
 
     def get_distribution(self, state):
         """Returns a normal distribution, from actions given state
@@ -181,58 +76,29 @@ class PPOPolicyNetwork(nn.Module):
         Returns:
             torch.tensor: action, probability
         """
-        mean, log_std = self.forward(state)
-        std = torch.exp(log_std)
-        noise = torch.randn_like(std)
-        probabilities = mean + std * noise
-        sampled_action = torch.tanh(probabilities)
-
-        # tanh outputs between -1 and 1, so multiply by action_max to map it to the action space
-        scaled_action = sampled_action * self.action_max
-
-        log_2pi = torch.log(torch.Tensor([2 * torch.pi]))
-        log_probs = -0.5 * (
-            ((probabilities - mean) / std).pow(2) + 2 * log_std + log_2pi
-        )
-
-        # one reason for epsilon is to avoid log 0, apparently theres other reasons
-        # also idk what this term actually is but they use it in the paper
-        epsilon = 1e-6
-        log_probs -= torch.log(self.action_max * (1 - sampled_action.pow(2)) + epsilon)
-        log_probs = log_probs.sum(dim=-1, keepdim=True)
-
-        # could get it to return mean as the 'optimal' action during evaluation?
-        return scaled_action, log_probs
+        distribution = self.get_distribution(state)
+        action = distribution.sample()
+        probability = distribution.log_prob(action).sum(dim=-1)
+        return action, probability
 
     def get_probability_given_action(self, state, action):
-        """ """
-        scaled_action = action / self.action_max
-        scaled_action = torch.clamp(scaled_action, -0.999999, 0.999999)
+        """Takes in the state and action, and returns the log probability of that action, given the state. So P(A|S), assuming a normal distribution
 
-        pre_tanh = 0.5 * (torch.log(1 + scaled_action) - torch.log(1 - scaled_action))
+        Args:
+            state (torch.Tensor): The current state
+            action (torch.Tensor): The action to be taken in this state
 
-        mean, log_std = self.forward(state)
-        std = torch.exp(log_std)
+        Returns:
+            torch.Tensor: the log-probability of action given state
+        """
+        distribution = self.get_distribution(state)
+        log_probs = distribution.log_prob(action).sum(dim=-1)
 
-        log_2pi = torch.log(torch.tensor([2 * torch.pi], device=state.device))
-        log_probs = -0.5 * (((pre_tanh - mean) / std).pow(2) + 2 * log_std + log_2pi)
+        return log_probs  # We can do sum here because they are LOG probs, usually our conditional probability would be x * y.
+        # We are doing exp to turn our log_prob into probability 0-1. Will do torch.exp in probability ratio method to return this to between 0 and 1
 
-        epsilon = 1e-6
-        log_probs -= torch.log(self.action_max * (1 - scaled_action.pow(2)) + epsilon)
-
-        log_probs = log_probs.sum(dim=-1, keepdim=False)
-        return log_probs
-
-    def evaluate(self, state, action):
-        pass
-
-    def forward(self, state: torch.Tensor) -> torch.Tensor:
-        hidden_values = self.network(state)
-        mean = self.mean(hidden_values)
-        log_std = self.log_std(hidden_values)
-        # they clamp this between -20 and 2 in the paper i believe
-        log_std = torch.clamp(log_std, min=-20, max=2)
-        return mean, log_std
+    def forward(self, state):
+        return self.network(state)
 
 
 class PPOValueNetwork(nn.Module):
@@ -251,8 +117,6 @@ class PPOValueNetwork(nn.Module):
             nn.ReLU(),
             nn.Linear(256, 256),
             nn.ReLU(),
-            nn.Linear(256, 256),
-            nn.ReLU(),
             nn.Linear(256, 1),
         )
 
@@ -265,27 +129,23 @@ class PPOAgent(Agent):
         self,
         env,
         epsilon=0.2,
-        gamma=0.98,
+        gamma=0.99,
         observation_space=115,  # Default from ant-v4
         action_space=8,
         std=0.4,
         learning_rate=3e-4,
         weight_decay=1e-5,
         lambda_gae=0.95,
-        minibatch_size=1024,
-        num_trajectories=30,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
-        num_epochs=1,
-        entropy_coef=0.1,
+        minibatch_size=64,
+        num_trajectories=10,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
+        num_epochs=3,
+        entropy_coef=0.01,
     ):
         super(PPOAgent, self).__init__(env)
 
         # Line 1 of pseudocode
-        self.policy_network = TanhPPOPolicy(
-            observation_space, action_space, hidden_size=256
-        )
-        self.old_policy_network = TanhPPOPolicy(
-            observation_space, action_space, hidden_size=256
-        )
+        self.policy_network = PPOPolicyNetwork(observation_space, action_space, std)
+        self.old_policy_network = PPOPolicyNetwork(observation_space, action_space, std)
         self.transfer_policy_net_to_old()
         self.policy_optimiser = optim.Adam(
             self.policy_network.parameters(),
@@ -295,7 +155,7 @@ class PPOAgent(Agent):
         self.value_network = PPOValueNetwork(observation_space)
         self.value_optimiser = optim.Adam(
             self.value_network.parameters(),
-            lr=learning_rate * 10,
+            lr=learning_rate,
             weight_decay=weight_decay,
         )
         self.epsilon = (
@@ -326,11 +186,17 @@ class PPOAgent(Agent):
         Returns:
             torch.Tensor: probability ratio of action, given state.
         """
-        current_log_prob = self.policy_network.get_log_prob(state, action)
-        old_log_prob = self.old_policy_network.get_log_prob(state, action)
+        current_log_prob = self.policy_network.get_probability_given_action(
+            state, action
+        )
+        old_log_prob = self.old_policy_network.get_probability_given_action(
+            state, action
+        )
         ratio = torch.exp(current_log_prob - old_log_prob)
 
-        ratio = torch.clamp(ratio, min=1e-10, max=1e10)
+        ratio = torch.clamp(
+            ratio, min=1e-2, max=1e2
+        )  # Avoid a huge change if we are doing lots of timesteps between changes
 
         return ratio  # This formula is P(A|S) / P_old(A|S) but we can do - since they are log probability
 
@@ -367,22 +233,27 @@ class PPOAgent(Agent):
         Returns:
             torch.Tensor: The advantage estimate for each step in trajectory.
         """
-        state_value_estimates = torch.tensor(
-            [self.value_network.forward(state) for state in states]
-        )  # V(S)
+        state_value_estimates = self.value_network(states).squeeze(-1)  # V(S)
         state_action_value_estimates = self.state_action_values_mc(rewards)  # Q(S,A)
-        return state_action_value_estimates - state_value_estimates  # Q(S,A) - V(S)
+        return (
+            state_action_value_estimates.float() - state_value_estimates
+        )  # Q(S,A) - V(S)
 
     def advantage_estimates_gae(self, states, rewards):
         """
         Use advantage estimation on value network, using GAE
+        Args:
+            states (torch.Tensor) :
+            rewards (torch.Tensor) :
+        Returns:
+            torch.Tensor: The advantage estimate for each step in trajectory.
         """
         values = torch.tensor([self.value_network.forward(state) for state in states])
         next_values = values[1:]
         values = values[:-1]
         advantages = torch.zeros_like(rewards)
 
-        rewards = rewards[:-1]
+        rewards = rewards[:-1]  # Final reward is for a state that will not be calculate
         deltas = rewards + self.gamma * next_values - values
 
         gae = 0
@@ -394,7 +265,6 @@ class PPOAgent(Agent):
 
     def get_trajectories(self):
         trajectories = []
-
         timesteps_count = 0
         for _ in range(self.num_trajectories):
             is_finished = False
@@ -412,7 +282,6 @@ class PPOAgent(Agent):
                     action.detach().numpy()
                 )
                 done = is_finished or is_truncated
-                # print(is_truncated, reward)
                 trajectory.append(
                     (
                         state,
@@ -427,10 +296,7 @@ class PPOAgent(Agent):
                 action, _ = self.policy_network.get_action(state)
                 timesteps_count += 1
 
-            trajectory.append(
-                (state, action, reward, state, is_finished, is_truncated)
-            )  # Append the final trajectory
-            trajectories.extend(trajectory)
+            trajectories.append(trajectory)
         return trajectories, timesteps_count
 
     def update_params(
@@ -447,13 +313,12 @@ class PPOAgent(Agent):
                     for this_state, this_action in zip(states, actions)
                 ]
             )
-        )  # pi (a_t| s_t) / pi (a_t, s_t)
+        ).squeeze()  # pi (a_t| s_t) / pi (a_t, s_t)
         clipped_g = torch.clamp(
             network_probability_ratio, 1 - self.epsilon, 1 + self.epsilon
         )  # g(\epsilon, advantage estimates)
         ratio_with_advantage = advantage_estimates * network_probability_ratio
         clipped_with_advantage = advantage_estimates * clipped_g
-        # ppo_clipped = torch.min(ratio_with_advantage, clipped_with_advantage) # TODO original advantage function
         ppo_clipped = torch.min(ratio_with_advantage, clipped_with_advantage)
         policy_loss = -(
             normalisation_factor
@@ -463,111 +328,79 @@ class PPOAgent(Agent):
         )  # We are minusing here because we are trying to find the arg max, so the LOSS needs to be negative. (since we are trying to minimise the loss)
 
         # Entropy bonus
-        # dist = self.policy_network.get_distribution(states)
-        # entropy = dist.entropy().mean()
-        # policy_loss = policy_loss - self.entropy_coef * entropy
-        # torch.nn.utils.clip_grad_norm_(self.policy_network.parameters(), max_norm=1.0)
+        dist = self.policy_network.get_distribution(states)
+        entropy = dist.entropy().mean()
+        policy_loss = policy_loss - self.entropy_coef * entropy
+        torch.nn.utils.clip_grad_norm_(
+            self.policy_network.parameters(), max_norm=1.0
+        )  # Avoid huge grad updates
         self.policy_optimiser.zero_grad()
         policy_loss.backward()
         self.policy_optimiser.step()
         # Line 7 in pseudocode
         value_estimates = self.value_network(states).squeeze()
-
-        # you can do this. its equivalent. also you can put a .squeeze directly in the forward, should help
-        # value_estimates = self.value_network.forward(states).squeeze()
+        self.value_optimiser.zero_grad()
         value_loss = torch.mean(torch.square(value_estimates - rewards_to_go))
         value_loss.backward()
         self.value_optimiser.step()
-
-        print(
-            f" Actor loss: {policy_loss.detach().numpy().item()} Critic loss: {value_loss.detach().numpy().item()}"
-        )
 
     def simulate_episode(self):
         """Simulate a single episode, called by train method on parent class"""
         self.transfer_policy_net_to_old()  # Transfer the current probability network to OLD, so that we are feezing it, before we start making updates
 
         trajectories, total_timesteps = self.get_trajectories()
+        all_states = []
+        all_actions = []
+        all_rewards_to_go = []
+        all_advantage_estimates = []
+        for this_trajectory in trajectories:
+            states = torch.stack(
+                [
+                    this_timestep[0].detach().float()
+                    for this_timestep in this_trajectory
+                ],
+                dim=0,
+            )
+            actions = torch.stack(
+                [
+                    this_timestep[1].detach().float()
+                    for this_timestep in this_trajectory
+                ],
+                dim=0,
+            )
+            rewards = torch.tensor(
+                [this_timestep[2] for this_timestep in this_trajectory]
+            )
+            # Line 4 in pseudocode
+            rewards_to_go = self.state_action_values_mc(rewards)
+            # Line 5 in Pseudocode
+            # Compute advantage estimates
+            advantage_estimates = self.advantage_estimates_gae(states, rewards)
 
-        ## Get lists of values from our trajectories,
-        states = torch.stack(
-            [this_timestep[0].detach().float() for this_timestep in trajectories], dim=0
-        )
-        actions = torch.stack(
-            [this_timestep[1].detach().float() for this_timestep in trajectories], dim=0
-        )
-        rewards = torch.tensor([this_timestep[2] for this_timestep in trajectories])
-
-        # Calculate rewards-to-go for each episode separately
-        rewards_to_go = []
-        episode_rewards = []
-        for reward, is_finished, is_truncated in zip(
-            rewards,
-            [this_timestep[4] for this_timestep in trajectories],
-            [this_timestep[5] for this_timestep in trajectories],
-        ):
-            episode_rewards.append(reward)
-            if is_finished or is_truncated:
-                rewards_to_go.extend(self.state_action_values_mc(episode_rewards))
-                episode_rewards = []
-
-        rewards_to_go = torch.tensor(rewards_to_go)
-        rewards_to_go = rewards_to_go - rewards_to_go.mean()
-        rewards_to_go = rewards_to_go / (rewards_to_go.std() + 1e-8)
-
-        # Line 5 in Pseudocode
-        # Compute advantage estimates
-        advantage_estimates = self.advantage_estimates_mc(states, rewards)
-        advantage_estimates = advantage_estimates - advantage_estimates.mean()
-        advantage_estimates = advantage_estimates / (advantage_estimates.std() + 1e-8)
-        # advantage_estimates = self.advantage_estimates_gae(states, rewards)
+            all_states.append(states)
+            all_actions.append(actions)
+            all_rewards_to_go.append(rewards_to_go)
+            all_advantage_estimates.append(advantage_estimates)
+        all_states = torch.cat(all_states, dim=0)
+        all_actions = torch.cat(all_actions, dim=0)
+        all_rewards_to_go = torch.cat(all_rewards_to_go, dim=0)
+        all_advantage_estimates = torch.cat(all_advantage_estimates, dim=0)
         for _ in range(self.num_epochs):
-            for current_batch_start in range(0, total_timesteps, self.minibatch_size):
-                current_batch_end = current_batch_start + self.minibatch_size
-                batch_locations = np.arange(total_timesteps)
-                np.random.shuffle(batch_locations)
-                current_batch = batch_locations[current_batch_start:current_batch_end]
-                timesteps_in_batch = len(current_batch)
+            batch_locations = np.arange(total_timesteps)
+            np.random.shuffle(batch_locations)
+
+            for this_batch_start in range(0, total_timesteps, self.minibatch_size):
+                this_batch_end = this_batch_start + self.minibatch_size
+                this_batch = batch_locations[this_batch_start:this_batch_end]
+                length_of_batch = len(this_batch)
                 self.update_params(
-                    rewards_to_go[current_batch],
-                    advantage_estimates[current_batch],
-                    states[current_batch],
-                    actions[current_batch],
-                    timesteps_in_batch,
+                    all_rewards_to_go[this_batch],
+                    all_advantage_estimates[this_batch],
+                    all_states[this_batch],
+                    all_actions[this_batch],
+                    length_of_batch,
                 )
         return total_timesteps, torch.sum(rewards)
-
-    def train(self, num_iterations=100_000, log_iterations=100):
-        """Train our agent for "n" timesteps
-
-        Args:
-            num_iterations (int, optional): The number of timesteps to run until. Defaults to 100_000.
-            log_iterations (int, optional): Logs after every n timesteps. Defaults to 100.
-        """
-        total_timesteps = 0
-        total_reward = []
-        average_rewards = []
-        last_log = 0
-        while total_timesteps < num_iterations:
-
-            timesteps, reward = (
-                self.simulate_episode()
-            )  # Taking total reward here because we want to maximise total reward, which is keeping pendulum up
-            total_reward.append(reward / self.num_trajectories)
-
-            if total_timesteps - last_log > log_iterations:
-                average_reward = sum(total_reward) / len(total_reward)
-                print(
-                    f"\r Processing Progress: {(total_timesteps/ num_iterations * 100):.2f}% Average reward:{average_reward:.2f} ",
-                    end="",
-                    flush=True,
-                )
-
-                average_rewards.append(average_reward)
-                total_reward = []
-                last_log = total_timesteps
-            total_timesteps += timesteps
-        self.plot(average_rewards)
 
     def efficient_train(self, num_iterations=1000):
         """Train our model for n iterations, without logging or plotting
@@ -581,13 +414,13 @@ class PPOAgent(Agent):
         timesteps = 0
         episodes = 0
         while timesteps < num_iterations:
-            # self.policy_network.update_std(timesteps, num_iterations)
+            self.policy_network.update_std(timesteps, num_iterations)
             elapsed_timesteps, reward = (
                 self.simulate_episode()
             )  # Simulate an episode and collect rewards
             reward = reward / self.num_trajectories
             timesteps += elapsed_timesteps
-            episodes += 1 * self.num_trajectories
+            episodes += self.num_trajectories
 
             self.reward_list.append(reward)
             self.timestep_list.append(timesteps)
@@ -598,7 +431,7 @@ class PPOAgent(Agent):
             print(
                 f"[Episode {episodes} / timestep {timesteps}] Received reward {reward:.3f}"
             )
-        return self.reward_list
+        return self.reward_list, self.timestep_list
 
     def plot(self, average_rewards):
         """Plot the average rewards other time
@@ -618,7 +451,9 @@ class PPOAgent(Agent):
         Returns:
             torch.Tensor: The best action to take in state S
         """
-        # self.policy_network.log_std = torch.tensor(np.log(0.2))
+        self.policy_network.log_std = torch.tensor(
+            np.log(0.05)
+        )  # Some stochasicity in video
         with torch.no_grad():
             action, _ = self.policy_network.get_action(state)
         return action.detach().numpy()
@@ -737,7 +572,7 @@ class DPOAgent(PPOAgent):
                     for this_state, this_action in zip(states, actions)
                 ]
             )
-        )  # pi (a_t| s_t) / pi (a_t, s_t) #TODO this isn't working
+        )  # pi (a_t| s_t) / pi (a_t, s_t)
 
         drift = self.calculate_drift(
             network_probability_ratio, advantage_estimates
@@ -754,6 +589,7 @@ class DPOAgent(PPOAgent):
         self.policy_optimiser.step()
 
         # Line 7 in pseudocode
+        self.value_optimiser.zero_grad()
         value_estimates = self.value_network(states).squeeze()
         value_loss = torch.mean(torch.square(value_estimates - rewards_to_go))
         value_loss.backward()
@@ -799,10 +635,11 @@ def verbose_train(environment):
     model.render(num_timesteps=100_000)
 
 
-# environments = [
-#     {"name": "InvertedPendulum-v4", "observation_space": 4, "action_space": 1},
-#     {"name": "Ant-v4", "observation_space": 27, "action_space": 8},
-#     {"name": "Ant-v5", "observation_space": 105, "action_space": 8},
-#     {"name": "Unitreee", "observation_space": 115, "action_space": 12},
-# ]
+environments = [
+    {"name": "InvertedPendulum-v4", "observation_space": 4, "action_space": 1},
+    {"name": "Ant-v4", "observation_space": 27, "action_space": 8},
+    {"name": "Ant-v5", "observation_space": 105, "action_space": 8},
+    {"name": "Unitreee", "observation_space": 115, "action_space": 12},
+]
+# Uncomment me to train
 # verbose_train(environments[1])
