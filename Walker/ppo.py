@@ -353,6 +353,7 @@ class PPOAgent(Agent):
         all_actions = []
         all_rewards_to_go = []
         all_advantage_estimates = []
+        all_rewards = []
         for this_trajectory in trajectories:
             states = torch.stack(
                 [
@@ -376,11 +377,12 @@ class PPOAgent(Agent):
             # Line 5 in Pseudocode
             # Compute advantage estimates
             advantage_estimates = self.advantage_estimates_gae(states, rewards)
-
+            all_rewards.append(rewards)
             all_states.append(states)
             all_actions.append(actions)
             all_rewards_to_go.append(rewards_to_go)
             all_advantage_estimates.append(advantage_estimates)
+        all_rewards = torch.cat(all_rewards, dim = 0)
         all_states = torch.cat(all_states, dim=0)
         all_actions = torch.cat(all_actions, dim=0)
         all_rewards_to_go = torch.cat(all_rewards_to_go, dim=0)
@@ -400,7 +402,7 @@ class PPOAgent(Agent):
                     all_actions[this_batch],
                     length_of_batch,
                 )
-        return total_timesteps, torch.sum(rewards)
+        return total_timesteps, torch.sum(all_rewards)
 
     def efficient_train(self, num_iterations=1000):
         """Train our model for n iterations, without logging or plotting
