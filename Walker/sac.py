@@ -156,6 +156,7 @@ class SACAgent(Agent):
 
         observation_space_shape = env.observation_space._shape[0]
         action_space_shape = env.action_space._shape[0]
+        #we assume action space is symmetrical, as both humanoid and ant are
         action_space_max_value = env.action_space.high[0]
         
         self.actor = SACPolicyNetwork(observation_space_shape,256,action_space_shape,action_space_max_value)
