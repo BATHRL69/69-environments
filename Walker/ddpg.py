@@ -140,16 +140,25 @@ class DDPGAgent(Agent):
         )
         self.critic_optimiser = Adam(self.critic.parameters(), lr = self.critic_lr)
 
-        # target
-        self.target_actor = copy.deepcopy(self.actor)
-        self.target_critic = copy.deepcopy(self.critic)
+        # targets
+        self.target_actor = ActorNetwork(
+            self.hidden_size,
+            ReLU(),
+            action_dim,
+            state_dim,
+            act_limit_high,
+            act_limit_low
+        )
 
-        # freeze target actor and target critic
-        for parameter in self.target_actor.parameters():
-            parameter.requires_grad = False
+        self.target_critic = CriticNetwork(
+            self.hidden_size,
+            ReLU(),
+            action_dim,
+            state_dim
+        )
 
-        for parameter in self.target_critic.parameters():
-            parameter.requires_grad = False
+        # setting target parameters to be regular network parameters
+        self.polyak_update(0)
 
         self.critic_losses = []
         self.actor_losses = []
@@ -167,6 +176,7 @@ class DDPGAgent(Agent):
 
         print(f"Populating replay buffer with {start_timesteps} timesteps of experience...")
 
+        # randomly sample from action space at first 
         while timesteps < start_timesteps:
             elapsed_timesteps, start_rewards = self.simulate_episode(should_learn=False)
             timesteps += elapsed_timesteps
@@ -183,33 +193,32 @@ class DDPGAgent(Agent):
         timestep = 0
         a_loss, c_loss = 0, 0
 
-        # line 3 of pseudocode
+
         while True:
 
             timestep += 1
-            self.persistent_timesteps += 1
 
-            # line 4 of pseudocode
+            # either sample from action space, or get action from policy network (actor)
             if should_learn:
                 with torch.no_grad():
-                    action = self.actor.predict(state).numpy()
+                    action = self.actor.predict(torch.tensor([state], dtype=torch.float32)).numpy()
             else:
                 action = self.env.action_space.sample()
 
 
-            # line 5-6 of pseudocode
+            # sample experience from the environment (making the action)
             new_state, reward, is_finished, is_truncated, _ = self.env.step(action)
             reward_total += reward
 
-            # line 7 of pseudocode
+            # save experience in replay buffer
             self.replay_buffer.add(Experience(state, new_state, action, reward, is_finished))
             state = new_state
 
-            # line 9-10 of pseudocode
+            # update parameters if appropriate
             if should_learn and timestep % self.training_frequency == 0:
                 a_loss, c_loss = self.update_params()
 
-            # line 8 of pseudocode - swapped since we might as well update even if it's a terminal state and the logic is easier this way
+            # finish episode if its done 
             if is_finished or is_truncated:
                 break
 
@@ -218,7 +227,13 @@ class DDPGAgent(Agent):
 
     def update_params(self):
 
+        # sampling from replay buffer
         old_states, new_states, actions, rewards, terminals = self.replay_buffer.get(self.replay_sample_size)
+        old_states = torch.tensor(old_states, dtype=torch.float32)
+        new_states = torch.tensor(new_states, dtype=torch.float32)
+        actions = torch.tensor(actions, dtype=torch.float32)
+        rewards = torch.tensor(rewards, dtype=torch.float32)
+        terminals = torch.tensor(terminals, dtype=torch.float32)
 
 
         self.actor_optimiser.zero_grad()
@@ -227,31 +242,26 @@ class DDPGAgent(Agent):
         actor_loss = 0
         critic_loss = 0
 
-
-        old_states = torch.tensor(old_states, dtype=torch.float32)
-        new_states = torch.tensor(new_states, dtype=torch.float32)
-        actions = torch.tensor(actions, dtype=torch.float32)
-        rewards = torch.tensor(rewards, dtype=torch.float32)
-        terminals = torch.tensor(terminals, dtype=torch.float32)
-
-        critic_pred = self.critic.predict(old_states,actions).T
+        critic_pred = self.critic.predict(old_states, actions)
 
 
-        # need this or else temp tuning doesnt work, also speeds it up
+        # stops target networks from being updated via gradient descent
         with torch.no_grad():
-            # line 12 of pseudocode
-            actor_prediction_new = self.actor.predict(new_states).T
+            
+            # calculating the "true" value of the value of the state
+            actor_prediction_new = self.target_actor.predict(new_states)
+            target = rewards + self.gamma * (1 - terminals) * self.target_critic.predict(new_states, actor_prediction_new)
 
-            target = rewards + self.gamma * (1 - terminals) * actor_prediction_new
 
-        # line 13 of psuedocode
-        critic_loss = torch.mean((critic_pred - target)**2)
+        # calculating critic loss + backpropping to update it
+        critic_loss = (critic_pred - target)**2
+        critic_loss = torch.mean(critic_loss)
 
         self.critic_optimiser.zero_grad()
         critic_loss.backward()
         self.critic_optimiser.step()
 
-        # line 14 of psuedocode
+        # calculating actor loss + backpropping to update it
         actor_prediction_old = self.actor.predict(old_states)
         critic_evalution = self.critic.predict(old_states, actor_prediction_old)
         actor_loss = torch.mean(-critic_evalution)
@@ -260,16 +270,17 @@ class DDPGAgent(Agent):
         actor_loss.backward()
         self.actor_optimiser.step()
 
-        self.polyak_update()
+        # polyak update target networks
+        self.polyak_update(self.polyak)
 
         return actor_loss.detach().numpy().item(), critic_loss.detach().numpy().item()
 
 
-    def polyak_update(self):
+    def polyak_update(self, polyak):
         for (parameter, target_parameter) in zip(self.critic.parameters(), self.target_critic.parameters()):
-            target_parameter.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_parameter.data)
+            target_parameter.data.copy_((1 - polyak) * parameter.data + polyak * target_parameter.data)
         for (parameter, target_parameter) in zip(self.actor.parameters(), self.target_actor.parameters()):
-            target_parameter.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_parameter.data)
+            target_parameter.data.copy_((1 - polyak) * parameter.data + polyak * target_parameter.data)
 
 class ActorNetwork(nn.Module):
 
@@ -291,9 +302,7 @@ class ActorNetwork(nn.Module):
     def forward(self, x):
         network_output = self.network(x)
         x = torch.tanh(network_output) # we need to scale the network's output within the action range
-        action_range = (self.action_max - self.action_min) / 2.0
-        action_mid = (self.action_max + self.action_min) / 2.0
-        scaled_output = action_mid + action_range * x
+        scaled_output = self.action_max * x
         return scaled_output
     
 
@@ -305,9 +314,7 @@ class ActorNetwork(nn.Module):
             noise = torch.randn(a.shape)
             a += noise * noise_rate
 
-        assert isinstance(a, torch.Tensor), f"Expected a PyTorch tensor, but got {type(a)}"
-        assert a.dtype == torch.float32, f"Expected tensor of dtype float32, but got {a.dtype}"
-        return a
+        return a.squeeze() 
 
 class CriticNetwork(nn.Module):
         
@@ -333,7 +340,7 @@ class CriticNetwork(nn.Module):
         action = torch.as_tensor(action, dtype=torch.float32)
         x = torch.concatenate([state, action],dim=1)
 
-        return self.forward(x)
+        return self.forward(x).squeeze() 
 
 
 if __name__ == "__main__":
