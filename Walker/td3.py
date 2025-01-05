@@ -86,7 +86,7 @@ class ReplayBuffer():
 
 class TD3Agent(Agent):
 
-    hidden_size = (256, 256)
+    hidden_size = 256
 
     def __init__(
             self,
@@ -101,9 +101,9 @@ class TD3Agent(Agent):
             actor_update_frequency: int = 2,
             target_noise=0.2, 
             noise_clip=0.5,
-            num_train_episodes: int = 100000,
             make_video = False
     ):
+        super(TD3Agent, self).__init__(env)
         # set hyperparams
         self.max_buffer_size = max_buffer_size
         self.replay_sample_size = replay_sample_size
@@ -115,7 +115,6 @@ class TD3Agent(Agent):
         self.actor_update_frequency = actor_update_frequency
         self.actor_target_noise = target_noise
         self.actor_noise_clip = noise_clip
-        self.num_train_episodes = num_train_episodes
         self.make_video = make_video
 
         # set up environment
@@ -146,8 +145,6 @@ class TD3Agent(Agent):
             state_dim,
             action_dim
         )
-        self.critic_optimiser_1 = Adam(self.critic_1.parameters(), lr = self.critic_lr)
-
         # q-value function 2
         self.critic_2 = CriticNetwork(
             self.hidden_size,
@@ -155,22 +152,36 @@ class TD3Agent(Agent):
             state_dim,
             action_dim
         )
-        self.critic_optimiser_2 = Adam(self.critic_2.parameters(), lr = self.critic_lr)
 
-        # target
-        self.target_actor = copy.deepcopy(self.actor)
-        self.target_critic_1 = copy.deepcopy(self.critic_1)
-        self.target_critic_2 = copy.deepcopy(self.critic_2)
+        # only need one optimiser as we can just update both together
+        self.critic_optimiser = Adam(list(self.critic_1.parameters())+list(self.critic_2.parameters()), lr = self.critic_lr)
 
-        # freeze target actor and target critic
-        for parameter in self.target_actor.parameters():
-            parameter.requires_grad = False
+        # targets
+        self.target_actor = ActorNetwork(
+            self.hidden_size,
+            ReLU(),
+            action_dim,
+            state_dim,
+            self.act_limit_high,
+            self.act_limit_low
+        )
 
-        for parameter in self.target_critic_1.parameters():
-            parameter.requires_grad = False
+        self.target_critic_1 = CriticNetwork(
+            self.hidden_size,
+            ReLU(),
+            action_dim,
+            state_dim
+        )
 
-        for parameter in self.target_critic_2.parameters():
-            parameter.requires_grad = False
+        self.target_critic_2 = CriticNetwork(
+            self.hidden_size,
+            ReLU(),
+            action_dim,
+            state_dim
+        )
+
+        # setting target parameters to be regular network parameters
+        self.polyak_update(0)
 
         self.critic_losses_1 = []
         self.critic_losses_2 = []
@@ -180,170 +191,134 @@ class TD3Agent(Agent):
         with torch.no_grad():
             return self.actor(state).numpy()
 
-    def get_critic_losses(self, data):
-        # extract observations from data
-        loss_q1 = 0
-        loss_q2 = 0
-        #this is batched now
-        current_states, next_states, actions, rewards, terminals = data
-        current_states = torch.Tensor(current_states)
-        next_states = torch.Tensor(next_states)
-        actions = torch.Tensor(actions)
-        rewards = torch.Tensor(rewards).unsqueeze(1)
-        terminals = torch.Tensor(terminals).unsqueeze(1)
 
-        pred_q1 = self.critic_1.predict(current_states, actions)
-        pred_q2 = self.critic_2.predict(current_states, actions)
+    def train(self, num_timesteps=50000, start_timesteps=1000):
+        """Train the agent over a given number of episodes."""
+        self.persistent_timesteps = 0
+        timesteps = 0
+        timestep_list = []
+        reward_list = []
 
-        eps = torch.randn(actions.shape) * self.actor_target_noise
-        eps = torch.clamp(eps, -self.actor_noise_clip, self.actor_noise_clip)
+        print(f"Populating replay buffer with {start_timesteps} timesteps of experience...")
 
-        noised_target_action = self.target_actor.predict(next_states) + eps
-        noised_target_action = torch.clamp(noised_target_action, self.act_limit_low, self.act_limit_high)
+        while timesteps < start_timesteps:
+            elapsed_timesteps, start_rewards = self.simulate_episode(should_learn=False)
+            timesteps += elapsed_timesteps
 
-        true = (rewards + self.gamma*(1 - terminals)*self.get_min_target_q_value(next_states, noised_target_action))
-
-        loss_q1 += (pred_q1 - true)**2
-        loss_q2 += (pred_q2 - true)**2
-            
-        loss_q1 = torch.mean(loss_q1)
-        loss_q2 = torch.mean(loss_q2)
-
-        return loss_q1, loss_q2
-    
-
-    def get_min_target_q_value(self, state, action):
-        q_value_1 = self.target_critic_1.predict(state, action)
-        q_value_2 = self.target_critic_2.predict(state, action)
-
-        min_q_value = torch.min(q_value_1, q_value_2) # change if gradient issues?
-
-        return min_q_value
-    
-
-    def get_min_q_value(self, state, action):
-        q_value_1 = self.critic_1.predict(state, action)
-        q_value_2 = self.critic_2.predict(state, action)
-
-        min_q_value = torch.min(q_value_1, q_value_2) # change if gradient issues?
-
-        return min_q_value
-    
-
-    def actor_loss(self, data):
-        loss = 0
-        #this is batched now
-        current_state, next_state, action, reward, terminal = data
-        loss += -(self.get_min_q_value(current_state, self.actor.predict(current_state)))
-        loss = torch.mean(loss)
-        return loss 
-
-    def train(self, start_steps=100):
-
-        last_s, _ = self.env.reset()
-
-        for episode in tqdm(range(start_steps)):
-            rand_a = self.env.action_space.sample()
-            new_s, reward, terminated, truncated, *args = self.env.step(rand_a)
-            done = terminated or truncated
-            experience = Experience(last_s,new_s,rand_a,reward,done)
-            self.replay_buffer.add(experience)
-            if done:
-                last_s, _ = self.env.reset()
-            else:
-                last_s = new_s
-
-        episodic_rewards = []
-
-        total_reward = 0
-        print("START TRAINING")
-        alive = 0
-        lives = 0
-        for episode in tqdm(range(self.num_train_episodes)):
-            
-            if episode in {10000,100000,200000,500000,999999} and self.make_video:
-                save_path_str = "new_td3_ant_"+str(episode)+".mp4"
-                make_video_td3("Ant-v4",self,save_path_str)
-            # action -> numpy array
-            a = self.actor.predict(last_s).detach().numpy()
-
-            # NUMPY ARRAY
-            assert isinstance(a, np.ndarray), f"Expected a NumPy array, but got {type(a)}"
-
-            new_s, reward, terminated, truncated, *args = self.env.step(a)
-            total_reward += reward
-            done = terminated or truncated
-            experience = Experience(last_s,new_s,a,reward,done)
-            self.replay_buffer.add(experience)
-            if done:
-                last_s, _ = self.env.reset()
-                episodic_rewards.append(total_reward)
-                GLOBAL_REWARDS.append(total_reward)
-                GLOBAL_TIMESTEPS.append(episode)
-                # print(lives, "attempt:\n", "died after ", alive, " steps", "total reward", total_reward, "\n")
-                total_reward = 0
-                alive = 0
-                lives += 1
+            timestep_list.append(timesteps)
+            reward_list.append(start_rewards)
                 
+        super().train(num_timesteps=num_timesteps, start_timesteps=start_timesteps)
+
+
+    def simulate_episode(self, should_learn=True):
+        state, _ = self.env.reset()
+        reward_total = 0
+        timestep = 0
+        a_loss, c_loss = 0, 0
+
+        while True:
+
+            timestep += 1
+
+            # either sample from action space, or get action from policy network (actor)
+            if should_learn:
+                with torch.no_grad():
+                    action = self.actor.predict(state).numpy()
             else:
-                alive += 1
-                last_s = new_s
+                action = self.env.action_space.sample()
 
-            if episode % self.training_frequency == 0:
-                self.update_weights((episode % self.actor_update_frequency == 0))
+            # sample experience from the environment (making the action)
+            new_state, reward, is_finished, is_truncated, _ = self.env.step(action)
+            reward_total += reward
 
-    def update_weights(self, update_actor):
-        
-        samples = self.replay_buffer.get(self.replay_sample_size)
-        self.actor_optimiser.zero_grad()
-        self.critic_optimiser_1.zero_grad()
-        self.critic_optimiser_2.zero_grad()
+            # save experience in replay buffer
+            self.replay_buffer.add(Experience(state, new_state, action, reward, is_finished))
+            state = new_state
 
+            # update parameters if appropriate
+            if should_learn and timestep % self.training_frequency == 0:
+                c_loss, a_loss = self.update_params(update_actor=timestep%self.actor_update_frequency)
 
-        # compute critic loss
-        critic_loss_1, critic_loss_2 = self.get_critic_losses(samples)
+            # finish episode if its done 
+            if is_finished or is_truncated:
+                break
 
-        # update critic 1
-        self.critic_losses_1.append(critic_loss_1.item())
-        critic_loss_1.backward()
-        self.critic_optimiser_1.step()
+        return timestep, reward_total
+    
+    def update_params(self, update_actor=True):
 
-        # update critic 2
-        self.critic_losses_2.append(critic_loss_2.item())
-        critic_loss_2.backward()
-        self.critic_optimiser_2.step()
+        # sampling from replay buffer
+        old_states, new_states, actions, rewards, terminals = self.replay_buffer.get(self.replay_sample_size)
+        old_states = torch.tensor(old_states, dtype=torch.float32)
+        new_states = torch.tensor(new_states, dtype=torch.float32)
+        actions = torch.tensor(actions, dtype=torch.float32)
+        rewards = torch.tensor(rewards, dtype=torch.float32)
+        terminals = torch.tensor(terminals, dtype=torch.float32)
 
-        if (update_actor):
-            # freeze both critics
-            for parameter in self.critic_1.parameters():
-                parameter.requires_grad = False
+        # td3 improvement - have two critics
+        critic_1_pred = self.critic_1.predict(old_states, actions)
+        critic_2_pred = self.critic_2.predict(old_states, actions)
 
-            for parameter in self.critic_2.parameters():
-                parameter.requires_grad = False
+        # stops target networks from being updated via gradient descent
+        with torch.no_grad():
             
-            # actor loss computation
-            actor_loss = self.actor_loss(samples)
-            self.actor_losses.append(actor_loss.item())
+            # calculating the "true" value of the value of the state
+            actor_prediction_new = self.target_actor.predict(new_states)
 
+            # td3 improvement - add noise to the action
+            clipped_noise = torch.clip(torch.rand(size=actor_prediction_new.shape), -self.actor_noise_clip, self.actor_noise_clip)
+            noised_actor_prediction = torch.clip(actor_prediction_new + clipped_noise, self.act_limit_low, self.act_limit_high)
+
+            # td3 improvement - take the minimum of both target critics
+            critic_1_eval = self.target_critic_1.predict(new_states, noised_actor_prediction)
+            critic_2_eval = self.target_critic_2.predict(new_states, noised_actor_prediction)
+            target_critic_eval = torch.min(critic_1_eval, critic_2_eval)
+
+            target = rewards + self.gamma * (1 - terminals) * target_critic_eval
+
+
+        # calculating each critic loss + backpropping to update both
+        critic_1_loss = torch.mean((critic_1_pred - target)**2)
+        critic_2_loss = torch.mean((critic_2_pred - target)**2)
+        total_critic_loss = critic_1_loss + critic_2_loss
+
+        self.critic_optimiser.zero_grad()
+        total_critic_loss.backward()
+        self.critic_optimiser.step()
+
+
+        # td3 improvement - delay policy network (actor) to only update every n critic updates
+        if update_actor:
+
+            # calculating actor loss + backpropping to update it
+            actor_prediction_old = self.actor.predict(old_states)
+            critic_evalution = self.critic_1.predict(old_states, actor_prediction_old) # use 1st target network for critic update
+            actor_loss = torch.mean(-critic_evalution)
+
+            self.actor_optimiser.zero_grad()
             actor_loss.backward()
             self.actor_optimiser.step()
 
-            # unfreeze both critics
-            for parameter in self.critic_1.parameters():
-                parameter.requires_grad = True
+            # we only update target networks when we also update policy
+            self.polyak_update(self.polyak)
 
-            for parameter in self.critic_2.parameters():
-                parameter.requires_grad = True
+            actor_loss = actor_loss.detach().numpy().item()
 
-            # polyak target network update
-            for p, target_p in zip(self.actor.parameters(), self.target_actor.parameters()):
-                target_p.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_p.data)
+        else:
+             actor_loss = 0   
 
-            for p, target_p in zip(self.critic_1.parameters(), self.target_critic_1.parameters()):
-                target_p.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_p.data)
+        return total_critic_loss.detach().numpy().item(), actor_loss
 
-            for p, target_p in zip(self.critic_2.parameters(), self.target_critic_2.parameters()):
-                target_p.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_p.data)
+
+
+    def polyak_update(self, polyak):
+        for (parameter, target_parameter) in zip(self.critic_1.parameters(), self.target_critic_1.parameters()):
+            target_parameter.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_parameter.data)
+        for (parameter, target_parameter) in zip(self.critic_2.parameters(), self.target_critic_2.parameters()):
+            target_parameter.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_parameter.data)
+        for (parameter, target_parameter) in zip(self.actor.parameters(), self.target_actor.parameters()):
+            target_parameter.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_parameter.data)
 
 class ActorNetwork(nn.Module):
 
@@ -353,25 +328,19 @@ class ActorNetwork(nn.Module):
         self.action_min = action_lim_low
         input_size = state_dim
         output_size = action_dim
-        layers = []
-        
-        layers.append(nn.Linear(input_size, hidden_size[0])) # input layer
-        layers.append(activation)
 
-        for i in range(0, len(hidden_size) - 1):
-            layers.append(nn.Linear(hidden_size[i], hidden_size[i + 1]))
-            layers.append(activation)
-
-        layers.append(nn.Linear(hidden_size[-1], output_size)) # output layer
-
-        self.network = nn.Sequential(*layers) # unpack layers and activation functions into sequential
+        self.network = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            activation,
+            nn.Linear(hidden_size, hidden_size),
+            activation,
+            nn.Linear(hidden_size, output_size)
+        ) 
 
     def forward(self, x):
         network_output = self.network(x)
         x = torch.tanh(network_output) # we need to scale the network's output within the action range
-        action_range = (self.action_max - self.action_min) / 2.0
-        action_mid = (self.action_max + self.action_min) / 2.0
-        scaled_output = action_mid + action_range * x
+        scaled_output = self.action_max * x
         return scaled_output
     
 
@@ -383,29 +352,22 @@ class ActorNetwork(nn.Module):
             noise = torch.randn(a.shape)
             a += noise * noise_rate
 
-        assert isinstance(a, torch.Tensor), f"Expected a PyTorch tensor, but got {type(a)}"
-        assert a.dtype == torch.float32, f"Expected tensor of dtype float32, but got {a.dtype}"
-        return a
-
+        return a.squeeze() 
 
 class CriticNetwork(nn.Module):
         
-    def __init__(self, hidden_size, activation, state_dim, action_dim):
+    def __init__(self, hidden_size, activation, action_dim, state_dim):
         super().__init__()
         input_size = action_dim + state_dim
-        output_size = 1 # critic network just outputs a value
-        layers = []
+        output_size = 1
 
-        layers.append(nn.Linear(input_size, hidden_size[0])) # input layer
-        layers.append(activation)
-
-        for i in range(0, len(hidden_size) - 1):
-            layers.append(nn.Linear(hidden_size[i], hidden_size[i+1]))
-            layers.append(activation)
-
-        layers.append(nn.Linear(hidden_size[-1], output_size)) # output layer
-
-        self.network = nn.Sequential(*layers) # unpack layers and activation functions into sequential
+        self.network = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            activation,
+            nn.Linear(hidden_size, hidden_size),
+            activation,
+            nn.Linear(hidden_size, output_size)
+        ) 
 
     def forward(self, x):
         return self.network(x)
@@ -415,7 +377,8 @@ class CriticNetwork(nn.Module):
         state = torch.as_tensor(state, dtype=torch.float32)
         action = torch.as_tensor(action, dtype=torch.float32)
         x = torch.concatenate([state, action],dim=1)
-        return self.forward(x)
+
+        return self.forward(x).squeeze() 
 
 
 if __name__ == "__main__":

@@ -95,7 +95,6 @@ class DDPGAgent(Agent):
             polyak: float = 0.995,
             gamma: float = 0.99,
             training_frequency: int = 1,
-            num_train_episodes: int = 100000,
             make_video: bool = False
     ):
         super(DDPGAgent, self).__init__(env)
@@ -107,7 +106,6 @@ class DDPGAgent(Agent):
         self.polyak = polyak
         self.gamma = gamma
         self.training_frequency = training_frequency
-        self.num_train_episodes = num_train_episodes
         self.make_video = make_video
 
         # set up environment
@@ -193,7 +191,6 @@ class DDPGAgent(Agent):
         timestep = 0
         a_loss, c_loss = 0, 0
 
-
         while True:
 
             timestep += 1
@@ -201,7 +198,7 @@ class DDPGAgent(Agent):
             # either sample from action space, or get action from policy network (actor)
             if should_learn:
                 with torch.no_grad():
-                    action = self.actor.predict(torch.tensor([state], dtype=torch.float32)).numpy()
+                    action = self.actor.predict(state).numpy()
             else:
                 action = self.env.action_space.sample()
 
@@ -235,15 +232,7 @@ class DDPGAgent(Agent):
         rewards = torch.tensor(rewards, dtype=torch.float32)
         terminals = torch.tensor(terminals, dtype=torch.float32)
 
-
-        self.actor_optimiser.zero_grad()
-        self.critic_optimiser.zero_grad()
-
-        actor_loss = 0
-        critic_loss = 0
-
         critic_pred = self.critic.predict(old_states, actions)
-
 
         # stops target networks from being updated via gradient descent
         with torch.no_grad():
