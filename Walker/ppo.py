@@ -196,7 +196,7 @@ class PPOAgent(Agent):
 
         ratio = torch.clamp(
             ratio, min=1e-2, max=1e2
-        )  # Avoid a huge change if we are doing lots of timesteps between changes
+        )  # Avoid a huge change if we are doing lots of timesteps between changes to networks
 
         return ratio  # This formula is P(A|S) / P_old(A|S) but we can do - since they are log probability
 
@@ -253,7 +253,7 @@ class PPOAgent(Agent):
         values = values[:-1]
         advantages = torch.zeros_like(rewards)
 
-        rewards = rewards[:-1]  # Final reward is for a state that will not be calculate
+        rewards = rewards[:-1]  # Final reward is for a state that will not be calculated
         deltas = rewards + self.gamma * next_values - values
 
         gae = 0
@@ -501,8 +501,8 @@ class DPOAgent(PPOAgent):
         num_trajectories=10,  # Note, if this is too high the agent may only run one training loop, so you will not be able to see the change over time. For instance for ant max episode is 1000 timesteps.
         num_epochs=3,
         entropy_coef=0.01,
-        alpha=2,
-        beta=0.6,
+        alpha=2.5,
+        beta=0.7,
     ):
         super().__init__(
             env,
@@ -564,9 +564,7 @@ class DPOAgent(PPOAgent):
         self, rewards_to_go, advantage_estimates, states, actions, total_timesteps
     ):
         # Line 6 in Pseudocode
-        normalisation_factor = 1 / (
-            total_timesteps
-        )  # 1 / D_k T, which is just timesteps in trajectory for us because we have 1 trajectory
+    
         network_probability_ratio = (
             torch.stack(  # Stack all the values in our list together,into one big list
                 [
