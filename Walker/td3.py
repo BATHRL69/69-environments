@@ -56,7 +56,6 @@ class Experience(NamedTuple):
     reward: float
     is_terminal: bool
 
-
 class ReplayBuffer():
     def __init__(self, max_capacity: int, state_shape_size: int, action_space_size: int):
         self.max_capacity = max_capacity
@@ -84,8 +83,6 @@ class ReplayBuffer():
         valid_entries = min(self.counter, self.max_capacity)
         indices = np.random.choice(list(range(valid_entries)), batch_size)
         return self.old_state_buffer[indices], self.new_state_buffer[indices], self.action_buffer[indices], self.reward_buffer[indices], self.is_terminal_buffer[indices]
-
-
 
 class TD3Agent(Agent):
 
@@ -294,28 +291,6 @@ class TD3Agent(Agent):
 
             if episode % self.training_frequency == 0:
                 self.update_weights((episode % self.actor_update_frequency == 0))
-
-        
-        # # Plot the episodic curve
-        # plt.plot(range(len(episodic_rewards)), episodic_rewards, label="Episodic rewards")
-        # plt.xlabel("Episodes")
-        # plt.ylabel("Total reward")
-        # plt.legend()
-        # plt.show()
-
-        # # Plot the critic loss curve
-        # plt.plot(range(len(self.critic_losses_1)), self.critic_losses_1, label="Critic loss")
-        # plt.xlabel("Episodes")
-        # plt.ylabel("Critic Losses")
-        # plt.legend()
-        # plt.show()
-
-        # # Plot the actor loss curve
-        # plt.plot(range(len(self.actor_losses)), self.actor_losses, label="Actor loss")
-        # plt.xlabel("Episodes")
-        # plt.ylabel("Actor Losses")
-        # plt.legend()
-        # plt.show()
 
     def update_weights(self, update_actor):
         

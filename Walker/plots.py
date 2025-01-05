@@ -3,19 +3,33 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 #LOADING DATA
-dpo_timesteps = np.load('dpo_ant_timesteps_1000000_0.npy')
-dpo_rewards = np.load('dpo_ant_rewards_1000000_0.npy')
-dpo_timesteps_2 = np.load('dpo_ant_timesteps_1000000_1.npy')
-dpo_rewards_2 = np.load('dpo_ant_rewards_1000000_1.npy')
-dpo_timesteps_3 = np.load('dpo_ant_timesteps_1000000_2.npy')
-dpo_rewards_3 = np.load('dpo_ant_rewards_1000000_2.npy')
+# dpo_timesteps = np.load('dpo_ant_timesteps_1000000_0.npy')
+# dpo_rewards = np.load('dpo_ant_rewards_1000000_0.npy')
+# dpo_timesteps_2 = np.load('dpo_ant_timesteps_1000000_1.npy')
+# dpo_rewards_2 = np.load('dpo_ant_rewards_1000000_1.npy')
+# dpo_timesteps_3 = np.load('dpo_ant_timesteps_1000000_2.npy')
+# dpo_rewards_3 = np.load('dpo_ant_rewards_1000000_2.npy')
 
-ppo_timesteps = np.load("ppo_timesteps_mean_1000000.npy")
-ppo_rewards = np.load("ppo_rewards_mean_1000000.npy")
-ppo_timesteps_2 = np.load("ppo_timesteps_1000000_2.npy")
-ppo_rewards_2 = np.load("ppo_rewards_1000000_2.npy")
-ppo_timesteps_3 = np.load("ppo_timesteps_1000000_3.npy")
-ppo_rewards_3 = np.load("ppo_rewards_1000000_3.npy")
+dpo_timesteps = np.load('new_dpo_timesteps_1000000_0.npy')
+dpo_rewards = np.load('new_dpo_rewards_1000000_0.npy')
+dpo_timesteps_2 = np.load('new_dpo_timesteps_1000000_1.npy')
+dpo_rewards_2 = np.load('new_dpo_rewards_1000000_1.npy')
+dpo_timesteps_3 = np.load('new_dpo_timesteps_1000000_2.npy')
+dpo_rewards_3 = np.load('new_dpo_rewards_1000000_2.npy')
+
+# ppo_timesteps = np.load("ppo_timesteps_mean_1000000.npy")
+# ppo_rewards = np.load("ppo_rewards_mean_1000000.npy")
+# ppo_timesteps_2 = np.load("ppo_timesteps_1000000_2.npy")
+# ppo_rewards_2 = np.load("ppo_rewards_1000000_2.npy")
+# ppo_timesteps_3 = np.load("ppo_timesteps_1000000_3.npy")
+# ppo_rewards_3 = np.load("ppo_rewards_1000000_3.npy")
+
+ppo_timesteps = np.load("new_ppo_timesteps_1000000_0.npy")
+ppo_rewards = np.load("new_ppo_rewards_1000000_0.npy")
+ppo_timesteps_2 = np.load("new_ppo_timesteps_1000000_1.npy")
+ppo_rewards_2 = np.load("new_ppo_rewards_1000000_1.npy")
+ppo_timesteps_3 = np.load("new_ppo_timesteps_1000000_2.npy")
+ppo_rewards_3 = np.load("new_ppo_rewards_1000000_2.npy")
 
 random_timesteps = np.load("random_timesteps_1000000_1.npy")
 random_rewards = np.load("random_rewards_1000000_1.npy")
@@ -45,12 +59,20 @@ sac_rewards_2 = np.load('new1_sac_ant_rewards_1000000_1.npy')
 sac_timesteps_3 = np.load('new1_sac_ant_timesteps_1000000_2.npy')
 sac_rewards_3 = np.load('new1_sac_ant_rewards_1000000_2.npy')
 
-sac_tuned_timesteps = np.load('sac_tuned_ant_timesteps_1000000_0.npy')
-sac_tuned_rewards = np.load('sac_tuned_ant_rewards_1000000_0.npy')
-sac_tuned_timesteps_2 = np.load('sac_tuned_ant_timesteps_1000000_1.npy')
-sac_tuned_rewards_2 = np.load('sac_tuned_ant_rewards_1000000_1.npy')
-sac_tuned_timesteps_3 = np.load('sac_tuned_ant_timesteps_1000000_2.npy')
-sac_tuned_rewards_3 = np.load('sac_tuned_ant_rewards_1000000_2.npy')
+# sac_tuned_timesteps = np.load('sac_tuned_ant_timesteps_1000000_0.npy')
+# sac_tuned_rewards = np.load('sac_tuned_ant_rewards_1000000_0.npy')
+# sac_tuned_timesteps_2 = np.load('sac_tuned_ant_timesteps_1000000_1.npy')
+# sac_tuned_rewards_2 = np.load('sac_tuned_ant_rewards_1000000_1.npy')
+# sac_tuned_timesteps_3 = np.load('sac_tuned_ant_timesteps_1000000_2.npy')
+# sac_tuned_rewards_3 = np.load('sac_tuned_ant_rewards_1000000_2.npy')
+
+sac_tuned_timesteps = np.load('NEW_SAC_TUNEDNOTRS_TIMESTEPS_1000000_0.npy')
+sac_tuned_rewards = np.load('NEW_SAC_TUNEDNOTRS_REWARDS_1000000_0.npy')
+sac_tuned_timesteps_2 = np.load('NEW_SAC_TUNEDNOTRS_TIMESTEPS_1000000_1.npy')
+sac_tuned_rewards_2 = np.load('NEW_SAC_TUNEDNOTRS_REWARDS_1000000_1.npy')
+sac_tuned_timesteps_3 = np.load('sac_tuned_notrs_timesteps_1m.npy')
+sac_tuned_rewards_3 = np.load('sac_tuned_notrs_rewards_1m.npy')
+
 
 def interpolate_rewards(timesteps_list, rewards_list, common_x):
     aligned_rewards = []
@@ -282,22 +304,24 @@ axs[0].fill_between(
     color="purple",
     alpha=0.2,
 )
-axs[0].plot(common_timesteps, dpo_mean, label="DPO", color="orange")
+
+axs[0].plot(common_timesteps, dpo_mean, label="DPO", color="magenta")
 axs[0].fill_between(
     common_timesteps,
     dpo_mean - dpo_std,
     dpo_mean + dpo_std,
-    color="orange",
+    color="magenta",
     alpha=0.2,
 )
-axs[0].plot(common_timesteps, ppo_mean, label="PPO", color="magenta")
+axs[0].plot(common_timesteps, ppo_mean, label="PPO", color="orange")
 axs[0].fill_between(
     common_timesteps,
     ppo_mean - ppo_std,
     ppo_mean + ppo_std,
-    color="magenta",
+    color="orange",
     alpha=0.2,
 )
+
 axs[0].set_xlabel("Timesteps")
 axs[0].set_ylabel("Average Reward")
 axs[0].legend(fontsize=16)
