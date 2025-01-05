@@ -83,7 +83,7 @@ class ReplayBuffer():
 
 class DDPGAgent(Agent):
 
-    hidden_size = (256, 256)
+    hidden_size = 256
 
     def __init__(
             self,
@@ -98,6 +98,7 @@ class DDPGAgent(Agent):
             num_train_episodes: int = 100000,
             make_video: bool = False
     ):
+        super(DDPGAgent, self).__init__(env)
         # set hyperparams
         self.max_buffer_size = max_buffer_size
         self.replay_sample_size = replay_sample_size
@@ -156,147 +157,119 @@ class DDPGAgent(Agent):
     def predict(self, state):
         with torch.no_grad():
             return self.actor(state).numpy()
+    
+    def train(self, num_timesteps=50000, start_timesteps=1000):
+        """Train the agent over a given number of episodes."""
+        self.persistent_timesteps = 0
+        timesteps = 0
+        timestep_list = []
+        reward_list = []
 
-    def critic_loss(self, data):
-        # extract observations from data
-        loss = 0
-        current_states, next_states, actions, rewards, terminals = data
-        current_states = torch.Tensor(current_states)
-        next_states = torch.Tensor(next_states)
-        actions = torch.Tensor(actions)
-        rewards = torch.Tensor(rewards).unsqueeze(1)
-        terminals = torch.Tensor(terminals).unsqueeze(1)
+        print(f"Populating replay buffer with {start_timesteps} timesteps of experience...")
 
-        pred = self.critic.predict(current_states, actions)
-        loss += (pred - (rewards+ self.gamma*(1 - terminals)*self.target_critic.predict(next_states, self.target_actor.predict(next_states))))**2
-            
-        loss = torch.mean(loss)
+        while timesteps < start_timesteps:
+            elapsed_timesteps, start_rewards = self.simulate_episode(should_learn=False)
+            timesteps += elapsed_timesteps
 
-        return loss
-
-    def actor_loss(self, data):
-        loss = 0
-        current_states, next_states, actions, rewards, terminals = data
-        loss += -(self.critic.predict(current_states, self.actor.predict(current_states)))
-        loss = torch.mean(loss)
-        return loss 
-
-    def train(self, start_steps=100):
-
-        last_s, _ = self.env.reset()
-
-        for episode in tqdm(range(start_steps)):
-            rand_a = self.env.action_space.sample()
-            new_s, reward, terminated, truncated, *args = self.env.step(rand_a)
-            done = terminated or truncated
-            experience = Experience(last_s,new_s,rand_a,reward,done)
-            self.replay_buffer.add(experience)
-            if done:
-                last_s, _ = self.env.reset()
-            else:
-                last_s = new_s
-
-        episodic_rewards = []
-
-        total_reward = 0
-        print("START TRAINING")
-        alive = 0
-        lives = 0
-        for episode in tqdm(range(self.num_train_episodes)):
-            if episode in {10000,100000,200000,500000,999999} and self.make_video:
-                save_path_str = "new_ddpg_ant_"+str(episode)+".mp4"
-                make_video_ddpg("Ant-v4",self,save_path_str)
-
-            # action -> numpy array
-            a = self.actor.predict(last_s).detach().numpy()
-
-            # NUMPY ARRAY
-            assert isinstance(a, np.ndarray), f"Expected a NumPy array, but got {type(a)}"
-
-            new_s, reward, terminated, truncated, *args = self.env.step(a)
-            total_reward += reward
-            done = terminated or truncated
-            experience = Experience(last_s,new_s,a,reward,done)
-            self.replay_buffer.add(experience)
-            if done:
-                last_s, _ = self.env.reset()
-
-                episodic_rewards.append(total_reward)
-                GLOBAL_REWARDS.append(total_reward)
-                GLOBAL_TIMESTEPS.append(episode)
-                # print(lives, "attempt:\n", "died after ", alive, " steps", "total reward", total_reward, "\n")
-
-                total_reward = 0
-                alive = 0
-                lives += 1
+            timestep_list.append(timesteps)
+            reward_list.append(start_rewards)
                 
+        super().train(num_timesteps=num_timesteps, start_timesteps=start_timesteps)
+
+
+    def simulate_episode(self, should_learn=True):
+        state, _ = self.env.reset()
+        reward_total = 0
+        timestep = 0
+        a_loss, c_loss = 0, 0
+
+        # line 3 of pseudocode
+        while True:
+
+            timestep += 1
+            self.persistent_timesteps += 1
+
+            # line 4 of pseudocode
+            if should_learn:
+                with torch.no_grad():
+                    action = self.actor.predict(state).numpy()
             else:
-                alive += 1
-                last_s = new_s
-
-            if episode % self.training_frequency == 0:
-                self.update_weights()
-
-            episodic_rewards.append(total_reward)
-
-        print(len(episodic_rewards))
+                action = self.env.action_space.sample()
 
 
-        
+            # line 5-6 of pseudocode
+            new_state, reward, is_finished, is_truncated, _ = self.env.step(action)
+            reward_total += reward
 
-        # # Plot the episodic curve
-        # plt.plot(range(len(episodic_rewards)), episodic_rewards, label="Episodic rewards")
-        # plt.xlabel("Episodes")
-        # plt.ylabel("Total reward")
-        # plt.legend()
-        # plt.show()
+            # line 7 of pseudocode
+            self.replay_buffer.add(Experience(state, new_state, action, reward, is_finished))
+            state = new_state
 
-        # # Plot the critic loss curve
-        # plt.plot(range(len(self.critic_losses)), self.critic_losses, label="Critic loss")
-        # plt.xlabel("Episodes")
-        # plt.ylabel("Critic Losses")
-        # plt.legend()
-        # plt.show()
+            # line 9-10 of pseudocode
+            if should_learn and timestep % self.training_frequency == 0:
+                a_loss, c_loss = self.update_params()
 
-        # # Plot the actor loss curve
-        # plt.plot(range(len(self.actor_losses)), self.actor_losses, label="Actor loss")
-        # plt.xlabel("Episodes")
-        # plt.ylabel("Actor Losses")
-        # plt.legend()
-        # plt.show()
+            # line 8 of pseudocode - swapped since we might as well update even if it's a terminal state and the logic is easier this way
+            if is_finished or is_truncated:
+                break
+
+        return timestep, reward_total
 
 
-    def update_weights(self):
-        samples = self.replay_buffer.get(self.replay_sample_size)
+    def update_params(self):
+
+        old_states, new_states, actions, rewards, terminals = self.replay_buffer.get(self.replay_sample_size)
+
+
         self.actor_optimiser.zero_grad()
         self.critic_optimiser.zero_grad()
 
-        # compute critic loss
-        critic_loss = self.critic_loss(samples)
-        self.critic_losses.append(critic_loss.item())
+        actor_loss = 0
+        critic_loss = 0
+
+
+        old_states = torch.tensor(old_states, dtype=torch.float32)
+        new_states = torch.tensor(new_states, dtype=torch.float32)
+        actions = torch.tensor(actions, dtype=torch.float32)
+        rewards = torch.tensor(rewards, dtype=torch.float32)
+        terminals = torch.tensor(terminals, dtype=torch.float32)
+
+        critic_pred = self.critic.predict(old_states,actions).T
+
+
+        # need this or else temp tuning doesnt work, also speeds it up
+        with torch.no_grad():
+            # line 12 of pseudocode
+            actor_prediction_new = self.actor.predict(new_states).T
+
+            target = rewards + self.gamma * (1 - terminals) * actor_prediction_new
+
+        # line 13 of psuedocode
+        critic_loss = torch.mean((critic_pred - target)**2)
+
+        self.critic_optimiser.zero_grad()
         critic_loss.backward()
         self.critic_optimiser.step()
 
-        # freeze the crtic
-        for parameter in self.critic.parameters():
-            parameter.requires_grad = False
+        # line 14 of psuedocode
+        actor_prediction_old = self.actor.predict(old_states)
+        critic_evalution = self.critic.predict(old_states, actor_prediction_old)
+        actor_loss = torch.mean(-critic_evalution)
 
-        # actor loss computation
-        actor_loss = self.actor_loss(samples)
-        self.actor_losses.append(actor_loss.item())
+        self.actor_optimiser.zero_grad()
         actor_loss.backward()
         self.actor_optimiser.step()
 
-        # unfreeze the critic
-        for parameter in self.critic.parameters():
-            parameter.requires_grad = True
+        self.polyak_update()
 
-        # polyak target network update
-        for p, target_p in zip(self.actor.parameters(), self.target_actor.parameters()):
-            target_p.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_p.data)
+        return actor_loss.detach().numpy().item(), critic_loss.detach().numpy().item()
 
-        for p, target_p in zip(self.critic.parameters(), self.target_critic.parameters()):
-            target_p.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_p.data)
+
+    def polyak_update(self):
+        for (parameter, target_parameter) in zip(self.critic.parameters(), self.target_critic.parameters()):
+            target_parameter.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_parameter.data)
+        for (parameter, target_parameter) in zip(self.actor.parameters(), self.target_actor.parameters()):
+            target_parameter.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_parameter.data)
 
 class ActorNetwork(nn.Module):
 
@@ -306,18 +279,14 @@ class ActorNetwork(nn.Module):
         self.action_min = action_lim_low
         input_size = state_dim
         output_size = action_dim
-        layers = []
-        
-        layers.append(nn.Linear(input_size, hidden_size[0])) # input layer
-        layers.append(activation)
 
-        for i in range(0, len(hidden_size) - 1):
-            layers.append(nn.Linear(hidden_size[i], hidden_size[i + 1]))
-            layers.append(activation)
-
-        layers.append(nn.Linear(hidden_size[-1], output_size)) # output layer
-
-        self.network = nn.Sequential(*layers) # unpack layers and activation functions into sequential
+        self.network = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            activation,
+            nn.Linear(hidden_size, hidden_size),
+            activation,
+            nn.Linear(hidden_size, output_size)
+        ) 
 
     def forward(self, x):
         network_output = self.network(x)
@@ -345,19 +314,15 @@ class CriticNetwork(nn.Module):
     def __init__(self, hidden_size, activation, action_dim, state_dim):
         super().__init__()
         input_size = action_dim + state_dim
-        output_size = 1 # critic network just outputs a value
-        layers = []
+        output_size = 1
 
-        layers.append(nn.Linear(input_size, hidden_size[0])) # input layer
-        layers.append(activation)
-
-        for i in range(0, len(hidden_size) - 1):
-            layers.append(nn.Linear(hidden_size[i], hidden_size[i+1]))
-            layers.append(activation)
-
-        layers.append(nn.Linear(hidden_size[-1], output_size)) # output layer
-
-        self.network = nn.Sequential(*layers) # unpack layers and activation functions into sequential
+        self.network = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            activation,
+            nn.Linear(hidden_size, hidden_size),
+            activation,
+            nn.Linear(hidden_size, output_size)
+        ) 
 
     def forward(self, x):
         return self.network(x)
