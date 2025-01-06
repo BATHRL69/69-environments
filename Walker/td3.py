@@ -153,8 +153,8 @@ class TD3Agent(Agent):
         )
 
         # only need one optimiser as we can just update both together
-        self.critic_1_optimiser = Adam(self.critic_1.parameters(), lr = self.critic_lr)
-        self.critic_2_optimiser = Adam(self.critic_1.parameters(), lr = self.critic_lr)
+        self.critics_optimiser = Adam(list(self.critic_1.parameters())+list(self.critic_2.parameters()), lr=actor_lr)
+
 
 
         # targets
@@ -279,13 +279,9 @@ class TD3Agent(Agent):
         total_critic_loss = critic_1_loss + critic_2_loss
         
 
-        self.critic_1_optimiser.zero_grad()
-        self.critic_2_optimiser.zero_grad()
-        critic_1_loss.backward()
-        critic_2_loss.backward()
-
-        self.critic_1_optimiser.step()
-        self.critic_2_optimiser.step()
+        self.critics_optimiser.zero_grad()
+        total_critic_loss.backward()
+        self.critics_optimiser.step()
 
 
         # td3 improvement - delay policy network (actor) to only update every n critic updates
@@ -314,11 +310,11 @@ class TD3Agent(Agent):
 
     def polyak_update(self, polyak):
         for (parameter, target_parameter) in zip(self.critic_1.parameters(), self.target_critic_1.parameters()):
-            target_parameter.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_parameter.data)
+            target_parameter.data.copy_((1 - polyak) * parameter.data + polyak * target_parameter.data)
         for (parameter, target_parameter) in zip(self.critic_2.parameters(), self.target_critic_2.parameters()):
-            target_parameter.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_parameter.data)
+            target_parameter.data.copy_((1 - polyak) * parameter.data + polyak * target_parameter.data)
         for (parameter, target_parameter) in zip(self.actor.parameters(), self.target_actor.parameters()):
-            target_parameter.data.copy_((1 - self.polyak) * parameter.data + self.polyak * target_parameter.data)
+            target_parameter.data.copy_((1 - polyak) * parameter.data + polyak * target_parameter.data)
 
 class ActorNetwork(nn.Module):
 
