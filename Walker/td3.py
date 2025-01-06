@@ -281,13 +281,13 @@ class ActorNetwork(nn.Module):
 
     def predict(self, state, test=False):
         noise_rate = 0.1
-        a = self.forward(torch.as_tensor(state, dtype=torch.float32))
+        action = self.forward(torch.as_tensor(state, dtype=torch.float32))
 
         if not test:
-            noise = torch.randn(a.shape)
-            a += noise * noise_rate
-        a = torch.clip(a,-self.action_limit,self.action_limit)
-        return a.squeeze() 
+            noise = torch.randn(action.shape)
+            action += noise * noise_rate
+        action = torch.clip(action,-self.action_limit,self.action_limit)
+        return action.squeeze() 
 
 class CriticNetwork(nn.Module):
         
