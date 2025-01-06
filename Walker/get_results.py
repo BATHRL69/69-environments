@@ -17,28 +17,24 @@ TIMESTEPS = 1000000
 # env = gym.make("Ant-v4", render_mode="rgb_array")
 # train_agent = sac.SACAgent(env)
 # train_agent.train(num_timesteps=TIMESTEPS, start_timesteps=START_STEPS)
-# np.save("sac_timesteps.npy", np.array(train_agent.timestep_list))
-# np.save("sac_rewards.npy", np.array(train_agent.reward_list))
+# np.save("sac_tuned_timesteps.npy", np.array(train_agent.timestep_list))
+# np.save("sac_tuned_rewards.npy", np.array(train_agent.reward_list))
 # env.close()
 
 # # DDPG AGENT
 # env = gym.make("Ant-v4", render_mode="rgb_array")
 # train_agent = ddpg.DDPGAgent(env)
 # train_agent.train(num_timesteps=TIMESTEPS, start_timesteps=START_STEPS)
-# timestep_list = ddpg.GLOBAL_TIMESTEPS
-# reward_list = ddpg.GLOBAL_REWARDS
-# np.save("ddpg_timesteps.npy", np.array(timestep_list))
-# np.save("ddpg_rewards.npy", np.array(reward_list))
+# np.save("ddpg_timesteps.npy", np.array(train_agent.timestep_list))
+# np.save("ddpg_rewards.npy", np.array(train_agent.reward_list))
 # env.close()
 
 # # TD3 AGENT
 # env = gym.make("Ant-v4", render_mode="rgb_array")
 # train_agent = td3.TD3Agent(env)
 # train_agent.train(num_timesteps=TIMESTEPS, start_timesteps=START_STEPS)
-# timestep_list = ddpg.GLOBAL_TIMESTEPS
-# reward_list = ddpg.GLOBAL_REWARDS
-# np.save("td3_timesteps.npy", np.array(timestep_list))
-# np.save("td3_rewards.npy", np.array(reward_list))
+# np.save("td3_timesteps.npy", np.array(train_agent.timestep_list))
+# np.save("td3_rewards.npy", np.array(train_agent.reward_list))
 # env.close()
 
 # # PPO AGENT
