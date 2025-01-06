@@ -110,9 +110,8 @@ class DDPGAgent(Agent):
 
         # set up environment
         self.env = env
+        self.action_limit: int = self.env.action_space.high[0]
         action_dim: int = self.env.action_space.shape[0]
-        act_limit_high: int = self.env.action_space.high[0]
-        act_limit_low: int = self.env.action_space.low[0]
         state_dim: int = self.env.observation_space.shape[0]
 
         self.replay_buffer = ReplayBuffer(self.max_buffer_size, state_dim, action_dim)
@@ -123,8 +122,7 @@ class DDPGAgent(Agent):
             ReLU(),
             action_dim,
             state_dim,
-            act_limit_high,
-            act_limit_low
+            self.action_limit
         )
 
         self.actor_optimiser = Adam(self.actor.parameters(), lr = self.actor_lr)
@@ -144,8 +142,7 @@ class DDPGAgent(Agent):
             ReLU(),
             action_dim,
             state_dim,
-            act_limit_high,
-            act_limit_low
+            self.action_limit
         )
 
         self.target_critic = CriticNetwork(
@@ -158,9 +155,6 @@ class DDPGAgent(Agent):
         # setting target parameters to be regular network parameters
         self.polyak_update(0)
 
-        self.critic_losses = []
-        self.actor_losses = []
-
     def predict(self, state):
         with torch.no_grad():
             return self.actor(state).numpy()
@@ -169,8 +163,6 @@ class DDPGAgent(Agent):
         """Train the agent over a given number of episodes."""
         self.persistent_timesteps = 0
         timesteps = 0
-        timestep_list = []
-        reward_list = []
 
         print(f"Populating replay buffer with {start_timesteps} timesteps of experience...")
 
@@ -179,8 +171,8 @@ class DDPGAgent(Agent):
             elapsed_timesteps, start_rewards = self.simulate_episode(should_learn=False)
             timesteps += elapsed_timesteps
 
-            timestep_list.append(timesteps)
-            reward_list.append(start_rewards)
+            self.timestep_list.append(timesteps)
+            self.reward_list.append(start_rewards)
                 
         super().train(num_timesteps=num_timesteps, start_timesteps=start_timesteps)
 
@@ -273,10 +265,9 @@ class DDPGAgent(Agent):
 
 class ActorNetwork(nn.Module):
 
-    def __init__(self, hidden_size, activation, action_dim, state_dim, action_lim_high, action_lim_low):
+    def __init__(self, hidden_size, activation, action_dim, state_dim, action_limit):
         super().__init__()
-        self.action_max = action_lim_high
-        self.action_min = action_lim_low
+        self.action_limit = action_limit
         input_size = state_dim
         output_size = action_dim
 
@@ -291,7 +282,7 @@ class ActorNetwork(nn.Module):
     def forward(self, x):
         network_output = self.network(x)
         x = torch.tanh(network_output) # we need to scale the network's output within the action range
-        scaled_output = self.action_max * x
+        scaled_output = self.action_limit * x
         return scaled_output
     
 
