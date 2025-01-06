@@ -34,7 +34,7 @@ import matplotlib.pyplot as plt
 
 ### PPO AGENT
 # env = gym.make("Ant-v4", render_mode="rgb_array")
-# train_agent = ppo.PPOAgent(env, observation_space=27, action_space=8, std=0.6)
+# train_agent = ppo.PPOAgent(env, observation_space=env.observation_space.shape[0], action_space=env.action_space.shape[0])
 # timestep_list_ppo, reward_list_ppo = train_agent.efficient_train(num_iterations=5_000)
 # np.save("ppo_timesteps.npy", np.array(timestep_list_ppo))
 # np.save("ppo_rewards.npy", np.array(reward_list_ppo))
@@ -42,7 +42,7 @@ import matplotlib.pyplot as plt
 
 ### DPO AGENT
 # env = gym.make("Ant-v4", render_mode="rgb_array")
-# train_agent = ppo.DPOAgent(env, observation_space=27, action_space=8, std=0.6)
+# train_agent = ppo.DPOAgent(env, observation_space=env.observation_space.shape[0], action_space=env.action_space.shape[0])
 # timestep_list_dpo, reward_list_dpo = train_agent.efficient_train(5_000)
 # np.save("dpo_timesteps.npy", np.array(timestep_list_dpo))
 # np.save("dpo_rewards.npy", np.array(reward_list_dpo))
