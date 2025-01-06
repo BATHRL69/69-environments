@@ -1,50 +1,12 @@
-import cv2
 import torch
 import torch.nn as nn
 from torch.optim import Adam
 from torch.nn import ReLU
 import gymnasium as gym
-import copy
-from typing import Any, NamedTuple, Tuple, List
-import matplotlib.pyplot as plt
+from typing import Any, NamedTuple
 import numpy as np
-import random
-from tqdm import tqdm
 
 from agent import Agent
-
-GLOBAL_TIMESTEPS = []
-GLOBAL_REWARDS = []
-
-random.seed(0)
-
-def make_video_ddpg(env_name,agent,save_path):
-    video_env = gym.make(env_name,render_mode="rgb_array")
-    print(f"Making video at {save_path}")
-    frames = []
-    state, _ = video_env.reset()
-    done = False
-    truncated = False
-
-    while not (done or truncated):
-        frame = video_env.render()
-        frames.append(frame)
-
-        # action = agent.predict(torch.Tensor(state))
-        # state, reward, done, truncated, info = env.step(action)
-        action = agent.actor.predict(torch.Tensor([state]),test=False)
-        state, reward, done, truncated ,info = video_env.step(action[0].detach().numpy())
-
-    # Save frames as a video
-    height, width, _ = frames[0].shape
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    video = cv2.VideoWriter(save_path, fourcc, 30, (width, height))
-
-    for frame in frames:
-        video.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-
-    video.release()
-    video_env.close()
 
 class Experience(NamedTuple):
     old_state: Any
@@ -83,7 +45,6 @@ class ReplayBuffer():
 
 class DDPGAgent(Agent):
 
-    hidden_size = 256
 
     def __init__(
             self,
@@ -99,6 +60,7 @@ class DDPGAgent(Agent):
     ):
         super(DDPGAgent, self).__init__(env)
         # set hyperparams
+        self.hidden_size=256
         self.max_buffer_size = max_buffer_size
         self.replay_sample_size = replay_sample_size
         self.actor_lr = actor_lr
@@ -181,7 +143,6 @@ class DDPGAgent(Agent):
         state, _ = self.env.reset()
         reward_total = 0
         timestep = 0
-        a_loss, c_loss = 0, 0
 
         while True:
 
@@ -205,7 +166,7 @@ class DDPGAgent(Agent):
 
             # update parameters if appropriate
             if should_learn and timestep % self.training_frequency == 0:
-                a_loss, c_loss = self.update_params()
+                self.update_params()
 
             # finish episode if its done 
             if is_finished or is_truncated:
@@ -254,8 +215,6 @@ class DDPGAgent(Agent):
         # polyak update target networks
         self.polyak_update(self.polyak)
 
-        return actor_loss.detach().numpy().item(), critic_loss.detach().numpy().item()
-
 
     def polyak_update(self, polyak):
         for (parameter, target_parameter) in zip(self.critic.parameters(), self.target_critic.parameters()):
@@ -288,13 +247,13 @@ class ActorNetwork(nn.Module):
 
     def predict(self, state, test=False):
         noise_rate = 0.1
-        a = self.forward(torch.as_tensor(state, dtype=torch.float32))
+        action = self.forward(torch.as_tensor(state, dtype=torch.float32))
 
         if not test:
-            noise = torch.randn(a.shape)
-            a += noise * noise_rate
+            noise = torch.randn(action.shape)
+            action += noise * noise_rate
 
-        return a.squeeze() 
+        return action.squeeze() 
 
 class CriticNetwork(nn.Module):
         
