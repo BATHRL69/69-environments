@@ -4,50 +4,9 @@ import torch.nn as nn
 from torch.optim import Adam
 from torch.nn import ReLU
 import gymnasium as gym
-import copy
-from typing import Any, NamedTuple, Tuple, List
-import matplotlib.pyplot as plt
+from typing import Any, NamedTuple
 import numpy as np
-import random
-from tqdm import tqdm
-
 from agent import Agent
-
-random.seed(0)
-
-GLOBAL_TIMESTEPS = []
-GLOBAL_REWARDS = []
-
-
-
-def make_video_td3(env_name,agent,save_path):
-    video_env = gym.make(env_name,render_mode="rgb_array")
-    print(f"Making video at {save_path}")
-    frames = []
-    state, _ = video_env.reset()
-    done = False
-    truncated = False
-
-    while not (done or truncated):
-        frame = video_env.render()
-        frames.append(frame)
-
-        # action = agent.predict(torch.Tensor(state))
-        # state, reward, done, truncated, info = env.step(action)
-        action = agent.actor.predict(torch.Tensor([state]),test=False)
-        state, reward, done, truncated ,info = video_env.step(action[0].detach().numpy())
-
-    # Save frames as a video
-    height, width, _ = frames[0].shape
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-    video = cv2.VideoWriter(save_path, fourcc, 30, (width, height))
-
-    for frame in frames:
-        video.write(cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-
-    video.release()
-    video_env.close()
-
 
 class Experience(NamedTuple):
     old_state: Any
@@ -99,7 +58,6 @@ class TD3Agent(Agent):
             actor_update_frequency: int = 2,
             target_noise=0.2, 
             noise_clip=0.5,
-            make_video = False
     ):
         super(TD3Agent, self).__init__(env)
         # set hyperparams
@@ -113,38 +71,36 @@ class TD3Agent(Agent):
         self.actor_update_frequency = actor_update_frequency
         self.actor_target_noise = target_noise
         self.actor_noise_clip = noise_clip
-        self.make_video = make_video
         self.persistent_timesteps = 0
 
         # set up environment
         self.env = env
         action_dim: int = self.env.action_space.shape[0]
-        self.act_limit: int = self.env.action_space.high[0]
+        self.action_limit: int = self.env.action_space.high[0]
         state_dim: int = self.env.observation_space.shape[0]
 
         self.replay_buffer = ReplayBuffer(self.max_buffer_size,state_dim,action_dim)
 
-
         # policy
         self.actor = ActorNetwork(
-            (256, 256),
+            256,
             ReLU(),
             action_dim,
             state_dim,
-            self.act_limit
+            self.action_limit
         )
         self.actor_optimiser = Adam(self.actor.parameters(), lr = self.actor_lr)
 
         # q-value function 1
         self.critic_1 = CriticNetwork(
-            (256, 256),
+            256,
             ReLU(),
             state_dim,
             action_dim
         )
         # q-value function 2
         self.critic_2 = CriticNetwork(
-            (256, 256),
+            256,
             ReLU(),
             state_dim,
             action_dim
@@ -155,22 +111,22 @@ class TD3Agent(Agent):
 
         # targets
         self.target_actor = ActorNetwork(
-            (256, 256),
+            256,
             ReLU(),
             action_dim,
             state_dim,
-            self.act_limit
+            self.action_limit
         )
 
         self.target_critic_1 = CriticNetwork(
-            (256, 256),
+            256,
             ReLU(),
             action_dim,
             state_dim
         )
 
         self.target_critic_2 = CriticNetwork(
-            (256, 256),
+            256,
             ReLU(),
             action_dim,
             state_dim
@@ -203,7 +159,6 @@ class TD3Agent(Agent):
         state, _ = self.env.reset()
         reward_total = 0
         timestep = 0
-        a_loss, c_loss = 0, 0
 
         while True:
 
@@ -227,7 +182,7 @@ class TD3Agent(Agent):
 
             # update parameters if appropriate
             if should_learn and self.persistent_timesteps % self.training_frequency == 0:
-                c_loss, a_loss = self.update_params(update_actor=timestep%self.actor_update_frequency)
+                self.update_params(update_actor=timestep%self.actor_update_frequency)
 
             # finish episode if its done 
             if is_finished or is_truncated:
@@ -257,7 +212,7 @@ class TD3Agent(Agent):
 
             # td3 improvement - add noise to the action
             clipped_noise =  torch.clip(torch.randn(size=actor_prediction_new.shape)* self.actor_target_noise, -self.actor_noise_clip, self.actor_noise_clip)
-            noised_actor_prediction = torch.clip(actor_prediction_new + clipped_noise, -self.act_limit, self.act_limit)
+            noised_actor_prediction = torch.clip(actor_prediction_new + clipped_noise, -self.action_limit, self.action_limit)
 
             # td3 improvement - take the minimum of both target critics
             critic_1_eval = self.target_critic_1.predict(new_states, noised_actor_prediction)
@@ -291,13 +246,6 @@ class TD3Agent(Agent):
             # we only update target networks when we also update policy
             self.polyak_update(self.polyak)
 
-            actor_loss = actor_loss.detach().numpy().item()
-
-        else:
-            actor_loss = 0 
-
-        return total_critic_loss.detach().numpy().item(), actor_loss
-
     def polyak_update(self, polyak):
         for (parameter, target_parameter) in zip(self.critic_1.parameters(), self.target_critic_1.parameters()):
             target_parameter.data.copy_((1 - polyak) * parameter.data + polyak * target_parameter.data)
@@ -310,18 +258,18 @@ class TD3Agent(Agent):
 
 class ActorNetwork(nn.Module):
 
-    def __init__(self, hidden_sizes, activation, action_dim, state_dim, action_limit):
+    def __init__(self, hidden_size, activation, action_dim, state_dim, action_limit):
         super().__init__()
         self.action_limit = action_limit
         input_size = state_dim
         output_size = action_dim
 
         self.network = nn.Sequential(
-            nn.Linear(input_size, hidden_sizes[0]),
+            nn.Linear(input_size, hidden_size),
             activation,
-            nn.Linear(hidden_sizes[0], hidden_sizes[1]),
+            nn.Linear(hidden_size, hidden_size),
             activation,
-            nn.Linear( hidden_sizes[1], output_size)
+            nn.Linear( hidden_size, output_size)
         ) 
 
     def forward(self, x):
@@ -343,17 +291,17 @@ class ActorNetwork(nn.Module):
 
 class CriticNetwork(nn.Module):
         
-    def __init__(self, hidden_sizes, activation, action_dim, state_dim):
+    def __init__(self, hidden_size, activation, action_dim, state_dim):
         super().__init__()
         input_size = action_dim + state_dim
         output_size = 1
 
         self.network = nn.Sequential(
-            nn.Linear(input_size,hidden_sizes[0]),
+            nn.Linear(input_size,hidden_size),
             activation,
-            nn.Linear(hidden_sizes[0],hidden_sizes[1]),
+            nn.Linear(hidden_size,hidden_size),
             activation,
-            nn.Linear(hidden_sizes[1],output_size)
+            nn.Linear(hidden_size,output_size)
         ) 
 
     def forward(self, x):
