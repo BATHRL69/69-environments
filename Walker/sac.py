@@ -213,7 +213,6 @@ class SACAgent(Agent):
         state, _ = self.env.reset()
         reward_total = 0
         timestep = 0
-        a_loss, c_loss = 0, 0
 
         # line 3 of pseudocode
         while True:
@@ -239,7 +238,7 @@ class SACAgent(Agent):
 
             # line 9-10 of pseudocode
             if should_learn and self.persistent_timesteps % self.update_threshold == 0:
-                a_loss, c_loss = self.update_params()
+                self.update_params()
 
             # line 8 of pseudocode - swapped since we might as well update even if it's a terminal state and the logic is easier this way
             if is_finished or is_truncated:
@@ -306,8 +305,6 @@ class SACAgent(Agent):
 
         # line 15 of pseudocode
         self.polyak_update(self.polyak)
-
-        return actor_loss.detach().numpy().item(), total_critic_loss.detach().numpy().item()
     
     def predict(self, state):
         with torch.no_grad():

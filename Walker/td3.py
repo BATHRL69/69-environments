@@ -1,4 +1,3 @@
-import cv2
 import torch
 import torch.nn as nn
 from torch.optim import Adam
@@ -235,7 +234,6 @@ class TD3Agent(Agent):
 
             # calculating actor loss + backpropping to update it
             actor_prediction_old = self.actor.predict(old_states)
-            # critic_evaluation = self.critic_1.predict(old_states, actor_prediction_old) # use 1st network for critic update
             critic_evaluation = torch.min(self.critic_1.predict(old_states, actor_prediction_old), self.critic_2.predict(old_states, actor_prediction_old))
             actor_loss = torch.mean(-critic_evaluation)
 

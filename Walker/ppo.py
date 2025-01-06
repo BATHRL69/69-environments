@@ -10,10 +10,6 @@ from ppo_constants import *
 import torch.optim as optim
 import matplotlib.pyplot as plt
 
-GLOBAL_TIMESTEPS = []
-GLOBAL_REWARDS = []
-
-
 class PPOPolicyNetwork(nn.Module):
     """This is sometimes also called the ACTOR network.
     Basically, the goal of this network is to take in a state, and give us the best possible actions to take in that state.
@@ -427,9 +423,6 @@ class PPOAgent(Agent):
             self.reward_list.append(reward)
             self.timestep_list.append(timesteps)
 
-            GLOBAL_TIMESTEPS.append(timesteps)
-            GLOBAL_REWARDS.append(reward)
-
             print(
                 f"[Episode {episodes} / timestep {timesteps}] Received reward {reward:.3f}"
             )
@@ -636,15 +629,13 @@ def verbose_train(environment):
     )
     model.train(num_iterations=100_000, log_iterations=1000)
     print("\n Training finished")
-    print("Rendering...")
-    model.render(num_timesteps=100_000)
 
 
-environments = [
-    {"name": "InvertedPendulum-v4", "observation_space": 4, "action_space": 1},
-    {"name": "Ant-v4", "observation_space": 27, "action_space": 8},
-    {"name": "Ant-v5", "observation_space": 105, "action_space": 8},
-    {"name": "Unitreee", "observation_space": 115, "action_space": 12},
-]
+# environments = [
+#     {"name": "InvertedPendulum-v4", "observation_space": 4, "action_space": 1},
+#     {"name": "Ant-v4", "observation_space": 27, "action_space": 8},
+#     {"name": "Ant-v5", "observation_space": 105, "action_space": 8},
+#     {"name": "Unitreee", "observation_space": 115, "action_space": 12},
+# ]
 # Uncomment me to train
 # verbose_train(environments[1])
