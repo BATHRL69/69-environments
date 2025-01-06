@@ -4,44 +4,46 @@ import numpy as np
 import torch
 import matplotlib.pyplot as plt
 
-#### SAC AGENT
-
+### SAC AGENT
+# env = gym.make("Ant-v4", render_mode="rgb_array")
 # train_agent = sac.SACAgent(env)
-# train_agent.train(num_timesteps=1_000_00, start_timesteps=1_000_00)
-# np.save("temp.npy", np.array(train_agent.timestep_list))
-# np.save("temp.npy", np.array(train_agent.reward_list))
+# train_agent.train(num_timesteps=5_000, start_timesteps=1_000)
+# np.save("sac_timesteps.npy", np.array(train_agent.timestep_list))
+# np.save("sac_rewards.npy", np.array(train_agent.reward_list))
+# env.close()
 
-#### DDPG AGENT
-
-# train_agent = ddpg.DDPGAgent(env,num_train_episodes=1_000_0,actor_lr = 0.0003,critic_lr=0.0003,training_frequency=1,replay_sample_size=256,max_buffer_size=1000000)
-# train_agent.train(1_000_000)
+### DDPG AGENT
+# env = gym.make("Ant-v4", render_mode="rgb_array")
+# train_agent = ddpg.DDPGAgent(env)
+# train_agent.train(num_timesteps=5_000, start_timesteps=1_000)
 # timestep_list = ddpg.GLOBAL_TIMESTEPS
 # reward_list = ddpg.GLOBAL_REWARDS
-# np.save("new_ddpg_ant_timesteps_1000000.npy", np.array(timestep_list))
-# np.save("new_ddpg_ant_rewards_1000000.npy", np.array(reward_list))
+# np.save("ddpg_timesteps.npy", np.array(timestep_list))
+# np.save("ddpg_rewards.npy", np.array(reward_list))
+# env.close()
 
 ### TD3 AGENT
-# train_agent = td3.TD3Agent(env,num_train_episodes=1_000_0,actor_lr=0.0003,critic_lr=0.0003,training_frequency=1,actor_update_frequency=2,replay_sample_size=256,max_buffer_size=1000000)
-# train_agent.train(1_000_000)
+# env = gym.make("Ant-v4", render_mode="rgb_array")
+# train_agent = td3.TD3Agent(env)
+# train_agent.train(num_timesteps=5_000, start_timesteps=1_000)
 # timestep_list = ddpg.GLOBAL_TIMESTEPS
 # reward_list = ddpg.GLOBAL_REWARDS
-# np.save("new_ddpg_ant_timesteps_1000000.npy", np.array(timestep_list))
-# np.save("new_ddpg_ant_rewards_1000000.npy", np.array(reward_list))
+# np.save("td3_timesteps.npy", np.array(timestep_list))
+# np.save("td3_rewards.npy", np.array(reward_list))
+# env.close()
 
 ### PPO AGENT
-
-env = gym.make("Ant-v4", render_mode="rgb_array")
-train_agent = ppo.PPOAgent(env, observation_space=27, action_space=8, std=0.6)
-timestep_list_ppo, reward_list_ppo = train_agent.efficient_train(1_000_000)
-np.save("ppo_timesteps_1000000.npy", np.array(timestep_list_ppo))
-np.save("ppo_rewards_1000000.npy", np.array(reward_list_ppo))
+# env = gym.make("Ant-v4", render_mode="rgb_array")
+# train_agent = ppo.PPOAgent(env, observation_space=27, action_space=8, std=0.6)
+# timestep_list_ppo, reward_list_ppo = train_agent.efficient_train(num_iterations=5_000)
+# np.save("ppo_timesteps.npy", np.array(timestep_list_ppo))
+# np.save("ppo_rewards.npy", np.array(reward_list_ppo))
 # env.close()
 
 ### DPO AGENT
-
 # env = gym.make("Ant-v4", render_mode="rgb_array")
 # train_agent = ppo.DPOAgent(env, observation_space=27, action_space=8, std=0.6)
-# timestep_list_ppo, reward_list_ppo = train_agent.efficient_train(1_000_000)
-# np.save("dpo_timesteps_1000000.npy", np.array(timestep_list_ppo))
-# np.save("dpo_rewards_1000000.npy", np.array(reward_list_ppo))
+# timestep_list_dpo, reward_list_dpo = train_agent.efficient_train(5_000)
+# np.save("dpo_timesteps.npy", np.array(timestep_list_dpo))
+# np.save("dpo_rewards.npy", np.array(reward_list_dpo))
 # env.close()

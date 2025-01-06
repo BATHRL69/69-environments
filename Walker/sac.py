@@ -245,7 +245,6 @@ class SACAgent(Agent):
             if is_finished or is_truncated:
                 break
 
-        print(f"Actor loss: {a_loss}, Critic loss: {c_loss}, Alpha: {self.alpha}")
         return timestep, reward_total
 
     def update_params(self):
