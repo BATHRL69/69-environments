@@ -86,8 +86,6 @@ class ReplayBuffer():
 
 class TD3Agent(Agent):
 
-    hidden_size = 256
-
     def __init__(
             self,
             env,
@@ -129,7 +127,7 @@ class TD3Agent(Agent):
 
         # policy
         self.actor = ActorNetwork(
-            self.hidden_size,
+            (400,300),
             ReLU(),
             action_dim,
             state_dim,
@@ -139,14 +137,14 @@ class TD3Agent(Agent):
 
         # q-value function 1
         self.critic_1 = CriticNetwork(
-            self.hidden_size,
+            (400,300),
             ReLU(),
             state_dim,
             action_dim
         )
         # q-value function 2
         self.critic_2 = CriticNetwork(
-            self.hidden_size,
+            (400,300),
             ReLU(),
             state_dim,
             action_dim
@@ -155,11 +153,9 @@ class TD3Agent(Agent):
         # only need one optimiser as we can just update both together
         self.critics_optimiser = Adam(list(self.critic_1.parameters())+list(self.critic_2.parameters()), lr=actor_lr)
 
-
-
         # targets
         self.target_actor = ActorNetwork(
-            self.hidden_size,
+            (400,300),
             ReLU(),
             action_dim,
             state_dim,
@@ -167,14 +163,14 @@ class TD3Agent(Agent):
         )
 
         self.target_critic_1 = CriticNetwork(
-            self.hidden_size,
+            (400,300),
             ReLU(),
             action_dim,
             state_dim
         )
 
         self.target_critic_2 = CriticNetwork(
-            self.hidden_size,
+            (400,300),
             ReLU(),
             action_dim,
             state_dim
@@ -186,7 +182,6 @@ class TD3Agent(Agent):
     def predict(self, state):
         with torch.no_grad():
             return self.actor(state).numpy()
-
 
     def train(self, num_timesteps=50000, start_timesteps=1000):
         """Train the agent over a given number of episodes."""
@@ -203,7 +198,6 @@ class TD3Agent(Agent):
             self.reward_list.append(start_rewards)
                 
         super().train(num_timesteps=num_timesteps, start_timesteps=start_timesteps)
-
 
     def simulate_episode(self, should_learn=True):
         state, _ = self.env.reset()
@@ -262,7 +256,7 @@ class TD3Agent(Agent):
             actor_prediction_new = self.target_actor.predict(new_states)
 
             # td3 improvement - add noise to the action
-            clipped_noise = torch.clip(torch.rand(size=actor_prediction_new.shape) * self.actor_target_noise, -self.actor_noise_clip, self.actor_noise_clip)
+            clipped_noise =  torch.clip(torch.randn(size=actor_prediction_new.shape)* self.actor_target_noise, -self.actor_noise_clip, self.actor_noise_clip)
             noised_actor_prediction = torch.clip(actor_prediction_new + clipped_noise, -self.act_limit, self.act_limit)
 
             # td3 improvement - take the minimum of both target critics
@@ -272,25 +266,23 @@ class TD3Agent(Agent):
 
             target = rewards + self.gamma * (1 - terminals) * target_critic_eval
 
-
         # calculating each critic loss + backpropping to update both
         critic_1_loss = torch.mean((critic_1_pred - target)**2)
         critic_2_loss = torch.mean((critic_2_pred - target)**2)
         total_critic_loss = critic_1_loss + critic_2_loss
         
-
         self.critics_optimiser.zero_grad()
         total_critic_loss.backward()
         self.critics_optimiser.step()
-
 
         # td3 improvement - delay policy network (actor) to only update every n critic updates
         if update_actor:
 
             # calculating actor loss + backpropping to update it
             actor_prediction_old = self.actor.predict(old_states)
-            critic_evalution = self.critic_1.predict(old_states, actor_prediction_old) # use 1st network for critic update
-            actor_loss = torch.mean(-critic_evalution)
+            # critic_evaluation = self.critic_1.predict(old_states, actor_prediction_old) # use 1st network for critic update
+            critic_evaluation = torch.min(self.critic_1.predict(old_states, actor_prediction_old), self.critic_2.predict(old_states, actor_prediction_old))
+            actor_loss = torch.mean(-critic_evaluation)
 
             self.actor_optimiser.zero_grad()
             actor_loss.backward()
@@ -302,34 +294,34 @@ class TD3Agent(Agent):
             actor_loss = actor_loss.detach().numpy().item()
 
         else:
-             actor_loss = 0   
+            actor_loss = 0 
 
         return total_critic_loss.detach().numpy().item(), actor_loss
-
-
 
     def polyak_update(self, polyak):
         for (parameter, target_parameter) in zip(self.critic_1.parameters(), self.target_critic_1.parameters()):
             target_parameter.data.copy_((1 - polyak) * parameter.data + polyak * target_parameter.data)
+
         for (parameter, target_parameter) in zip(self.critic_2.parameters(), self.target_critic_2.parameters()):
             target_parameter.data.copy_((1 - polyak) * parameter.data + polyak * target_parameter.data)
+
         for (parameter, target_parameter) in zip(self.actor.parameters(), self.target_actor.parameters()):
             target_parameter.data.copy_((1 - polyak) * parameter.data + polyak * target_parameter.data)
 
 class ActorNetwork(nn.Module):
 
-    def __init__(self, hidden_size, activation, action_dim, state_dim, action_limit):
+    def __init__(self, hidden_sizes, activation, action_dim, state_dim, action_limit):
         super().__init__()
         self.action_limit = action_limit
         input_size = state_dim
         output_size = action_dim
 
         self.network = nn.Sequential(
-            nn.Linear(input_size, hidden_size),
+            nn.Linear(input_size, hidden_sizes[0]),
             activation,
-            nn.Linear(hidden_size, hidden_size),
+            nn.Linear(hidden_sizes[0], hidden_sizes[1]),
             activation,
-            nn.Linear(hidden_size, output_size)
+            nn.Linear( hidden_sizes[1], output_size)
         ) 
 
     def forward(self, x):
@@ -346,22 +338,22 @@ class ActorNetwork(nn.Module):
         if not test:
             noise = torch.randn(a.shape)
             a += noise * noise_rate
-
+        a = torch.clip(a,-self.action_limit,self.action_limit)
         return a.squeeze() 
 
 class CriticNetwork(nn.Module):
         
-    def __init__(self, hidden_size, activation, action_dim, state_dim):
+    def __init__(self, hidden_sizes, activation, action_dim, state_dim):
         super().__init__()
         input_size = action_dim + state_dim
         output_size = 1
 
         self.network = nn.Sequential(
-            nn.Linear(input_size, hidden_size),
+            nn.Linear(input_size,hidden_sizes[0]),
             activation,
-            nn.Linear(hidden_size, hidden_size),
+            nn.Linear(hidden_sizes[0],hidden_sizes[1]),
             activation,
-            nn.Linear(hidden_size, output_size)
+            nn.Linear(hidden_sizes[1],output_size)
         ) 
 
     def forward(self, x):
@@ -375,8 +367,7 @@ class CriticNetwork(nn.Module):
 
         return self.forward(x).squeeze() 
 
-
 if __name__ == "__main__":
     env = gym.make("Ant-v4", render_mode=None)
     agent = TD3Agent(env)
-    agent.train()
+    agent.train(num_timesteps=200_000,start_timesteps=25000)
