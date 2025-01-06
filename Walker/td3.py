@@ -127,7 +127,7 @@ class TD3Agent(Agent):
 
         # policy
         self.actor = ActorNetwork(
-            (400,300),
+            (256, 256),
             ReLU(),
             action_dim,
             state_dim,
@@ -137,14 +137,14 @@ class TD3Agent(Agent):
 
         # q-value function 1
         self.critic_1 = CriticNetwork(
-            (400,300),
+            (256, 256),
             ReLU(),
             state_dim,
             action_dim
         )
         # q-value function 2
         self.critic_2 = CriticNetwork(
-            (400,300),
+            (256, 256),
             ReLU(),
             state_dim,
             action_dim
@@ -155,7 +155,7 @@ class TD3Agent(Agent):
 
         # targets
         self.target_actor = ActorNetwork(
-            (400,300),
+            (256, 256),
             ReLU(),
             action_dim,
             state_dim,
@@ -163,14 +163,14 @@ class TD3Agent(Agent):
         )
 
         self.target_critic_1 = CriticNetwork(
-            (400,300),
+            (256, 256),
             ReLU(),
             action_dim,
             state_dim
         )
 
         self.target_critic_2 = CriticNetwork(
-            (400,300),
+            (256, 256),
             ReLU(),
             action_dim,
             state_dim
