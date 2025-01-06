@@ -433,7 +433,7 @@ class PPOAgent(Agent):
             print(
                 f"[Episode {episodes} / timestep {timesteps}] Received reward {reward:.3f}"
             )
-        return self.reward_list, self.timestep_list
+        return self.timestep_list, self.reward_list
 
     def plot(self, average_rewards):
         """Plot the average rewards other time
